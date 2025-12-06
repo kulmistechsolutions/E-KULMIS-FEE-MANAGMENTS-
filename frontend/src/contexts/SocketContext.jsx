@@ -29,9 +29,10 @@ export const SocketProvider = ({ children }) => {
     }
 
     // Connect to Socket.io server
-    // In development, use the API URL directly. In production, use the same origin
+    // Use VITE_API_URL if available, otherwise use localhost for development
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000'
-    const socketUrl = import.meta.env.DEV ? apiUrl : window.location.origin
+    // Extract base URL without /api suffix for Socket.io
+    const socketUrl = apiUrl.replace('/api', '')
     
     const newSocket = io(socketUrl, {
       transports: ['polling', 'websocket'], // Try polling first, then websocket
