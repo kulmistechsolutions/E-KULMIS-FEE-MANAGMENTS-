@@ -3,6 +3,10 @@ import axios from 'axios'
 
 const AuthContext = createContext()
 
+// Configure axios base URL for API requests
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
+axios.defaults.baseURL = API_BASE_URL
+
 export function useAuth() {
   return useContext(AuthContext)
 }
@@ -23,7 +27,7 @@ export function AuthProvider({ children }) {
 
   const fetchUser = async () => {
     try {
-      const response = await axios.get('/api/auth/me')
+      const response = await axios.get('/auth/me')
       setUser(response.data.user)
     } catch (error) {
       localStorage.removeItem('token')
@@ -34,7 +38,7 @@ export function AuthProvider({ children }) {
   }
 
   const login = async (username, password) => {
-    const response = await axios.post('/api/auth/login', { username, password })
+    const response = await axios.post('/auth/login', { username, password })
     const { token, user } = response.data
     localStorage.setItem('token', token)
     axios.defaults.headers.common['Authorization'] = `Bearer ${token}`

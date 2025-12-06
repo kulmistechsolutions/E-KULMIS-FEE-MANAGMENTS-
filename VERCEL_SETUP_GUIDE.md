@@ -148,25 +148,115 @@ If you added the environment variable AFTER the first deployment:
 1. Visit your Vercel URL: `https://your-project.vercel.app`
 2. Open browser console (F12)
 3. Check for errors
-4. Try to login with:
+4. **⚠️ IMPORTANT: Create Admin User First!**
+
+   Before you can login, you need to create an admin user in your deployed backend database:
+   
+   **Option 1: Using create-admin script (Recommended)**
+   ```bash
+   # Connect to your backend environment
+   cd backend
+   # Make sure your .env has the correct DATABASE_URL pointing to your production database
+   npm run create-admin ROWDA rowda@rowdatul-iimaan.com ROWDA123
+   ```
+   
+   **Option 2: Using reset-database script**
+   ```bash
+   cd backend
+   # ⚠️ WARNING: This deletes all data!
+   npm run reset-db
+   # This will create ROWDA user automatically
+   ```
+
+5. Try to login with:
    - Username: `ROWDA`
    - Password: `ROWDA123`
-5. If login works, you're connected! ✅
+6. If login works, you're connected! ✅
 
 ---
 
+## 🔐 Login Credentials Setup
+
+### Default Admin User (Created by setup-db)
+- Username: `admin`
+- Password: `admin123`
+
+### ROWDA Admin User (Created by reset-db or create-admin)
+- Username: `ROWDA`
+- Password: `ROWDA123`
+
+**To create ROWDA user on your production database:**
+```bash
+cd backend
+# Set DATABASE_URL to your production database in .env
+npm run create-admin ROWDA rowda@rowdatul-iimaan.com ROWDA123
+```
+
+**⚠️ Note:** If you can't login, make sure:
+1. The admin user exists in your database
+2. You're using the correct database (production vs local)
+3. Your backend is connected to the same database
+
 ## Still Having Issues?
 
-1. **Check Vercel Logs**:
+### Issue: 405 (Method Not Allowed) Error on Login
+
+**Error Message:**
+```
+POST https://your-vercel-app.vercel.app/api/auth/login 405 (Method Not Allowed)
+```
+
+**Cause:** The frontend is trying to call the API on your Vercel domain instead of your backend server.
+
+**Solution:**
+1. **Set VITE_API_URL Environment Variable** (MOST IMPORTANT):
+   - Go to Vercel Dashboard → Your Project → Settings → Environment Variables
+   - Add: `VITE_API_URL` = `https://your-backend.onrender.com/api`
+   - Make sure to check all 3 environments (Production, Preview, Development)
+   - Click Save
+
+2. **Redeploy Your Frontend:**
+   - Go to Deployments tab
+   - Click "..." on latest deployment → "Redeploy"
+   - Wait for deployment to complete
+
+3. **Verify Backend URL:**
+   - Your backend should be running on Render (or another service)
+   - Test: Visit `https://your-backend.onrender.com/api/health`
+   - Should return: `{"status":"ok","message":"Server is running"}`
+
+4. **Clear Browser Cache:**
+   - Hard refresh (Ctrl+Shift+R or Cmd+Shift+R)
+   - Or clear browser cache and reload
+
+### Issue: Can't Login?
+
+1. **Verify Admin User Exists:**
+   - Connect to your production database
+   - Run: `npm run create-admin ROWDA rowda@rowdatul-iimaan.com ROWDA123`
+   - Make sure your `.env` points to production database
+
+2. **Try Default Credentials:**
+   - Username: `admin`
+   - Password: `admin123`
+
+3. **Check Database Connection:**
+   - Verify backend can connect to database
+   - Check backend logs for errors
+
+### Other Issues:
+
+1. **Check Vercel Logs:**
    - Go to Deployment → Click on failed deployment → View logs
 
-2. **Verify Backend is Running**:
+2. **Verify Backend is Running:**
    - Visit: `https://your-backend.onrender.com/api/health`
    - Should return: `{"status":"ok","message":"Server is running"}`
 
-3. **Check CORS**:
+3. **Check CORS:**
    - Make sure backend CORS allows your Vercel domain
    - Check `backend/server.js` CORS configuration
+   - Add your Vercel domain to `FRONTEND_URL` in backend `.env`
 
 ---
 
