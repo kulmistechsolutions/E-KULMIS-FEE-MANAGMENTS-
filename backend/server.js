@@ -21,9 +21,31 @@ const __dirname = dirname(__filename);
 
 const app = express();
 const httpServer = createServer(app);
+
+// Configure allowed origins for CORS
+const getAllowedOrigins = () => {
+  const origins = ["http://localhost:3000", "http://127.0.0.1:3000"];
+  
+  // Add FRONTEND_URL if set
+  if (process.env.FRONTEND_URL) {
+    const frontendUrls = process.env.FRONTEND_URL.split(',').map(url => url.trim());
+    origins.push(...frontendUrls);
+  }
+  
+  // Add Vercel domain if not already included
+  const vercelDomain = "https://rowdafeems-cu97.vercel.app";
+  if (!origins.includes(vercelDomain)) {
+    origins.push(vercelDomain);
+  }
+  
+  return origins;
+};
+
+const allowedOrigins = getAllowedOrigins();
+
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || ["http://localhost:3000", "http://127.0.0.1:3000"],
+    origin: allowedOrigins,
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization"]
@@ -36,8 +58,22 @@ const PORT = process.env.PORT || 5000;
 // Make io available to routes
 app.set('io', io);
 
-// Middleware
-app.use(cors());
+// Middleware - Configure CORS to match Socket.IO settings
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

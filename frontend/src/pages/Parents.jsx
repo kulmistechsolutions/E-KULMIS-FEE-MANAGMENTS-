@@ -18,6 +18,7 @@ export default function Parents() {
   const [parents, setParents] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingParent, setEditingParent] = useState(null)
   const [formData, setFormData] = useState({
