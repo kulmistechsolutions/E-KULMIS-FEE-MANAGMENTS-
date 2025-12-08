@@ -172,7 +172,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 // Export all parents to Excel
 router.get('/export', authenticateToken, async (req, res) => {
   try {
-    // Get all parents without pagination
+    // Get all parents with aggregated data
     const query = `
       SELECT 
         p.id,
@@ -181,15 +181,7 @@ router.get('/export', authenticateToken, async (req, res) => {
         p.number_of_children,
         p.monthly_fee_amount,
         COALESCE(SUM(pmf.outstanding_after_payment), 0) as total_outstanding,
-        (
-          SELECT status 
-          FROM parent_month_fee pmf2
-          JOIN billing_months bm ON pmf2.billing_month_id = bm.id
-          WHERE pmf2.parent_id = p.id 
-            AND bm.is_active = true
-          ORDER BY bm.year DESC, bm.month DESC
-          LIMIT 1
-        ) as current_month_status,
+        MAX(CASE WHEN bm.is_active = true THEN pmf.status END) as current_month_status,
         p.created_at
       FROM parents p
       LEFT JOIN parent_month_fee pmf ON pmf.parent_id = p.id
