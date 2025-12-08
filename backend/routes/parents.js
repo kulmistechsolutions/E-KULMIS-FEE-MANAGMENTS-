@@ -191,18 +191,23 @@ router.get('/export', authenticateToken, async (req, res) => {
     `;
 
     const result = await pool.query(query);
-    const parents = result.rows;
+    const parents = result.rows || [];
 
-    // Prepare data for Excel
+    // Validate we have data
+    if (!parents || parents.length === 0) {
+      return res.status(404).json({ error: 'No parents found to export' });
+    }
+
+    // Prepare data for Excel with null safety
     const excelData = parents.map(parent => ({
-      'ID': parent.id,
-      'Parent Name': parent.parent_name,
-      'Phone Number': parent.phone_number,
-      'Number of Children': parent.number_of_children,
+      'ID': parent.id || '',
+      'Parent Name': parent.parent_name || '',
+      'Phone Number': parent.phone_number || '',
+      'Number of Children': parent.number_of_children || 0,
       'Monthly Fee': parseFloat(parent.monthly_fee_amount || 0).toFixed(2),
       'Total Outstanding': parseFloat(parent.total_outstanding || 0).toFixed(2),
       'Current Status': parent.current_month_status || 'N/A',
-      'Date Added': new Date(parent.created_at).toLocaleDateString()
+      'Date Added': parent.created_at ? new Date(parent.created_at).toLocaleDateString() : ''
     }));
 
     // Create workbook
