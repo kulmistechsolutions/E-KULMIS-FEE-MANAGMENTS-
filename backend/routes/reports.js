@@ -1554,6 +1554,8 @@ router.get('/export-teachers-pdf', authenticateToken, async (req, res) => {
         doc.text(row.status || '-', 505, doc.y, { width: 40 });
         doc.moveDown(0.4);
       });
+    } else {
+      doc.fontSize(12).font('Helvetica').text('No teacher salary records found for this period.', 50, doc.y);
     }
 
     doc.moveDown(1);
@@ -1563,7 +1565,11 @@ router.get('/export-teachers-pdf', authenticateToken, async (req, res) => {
     doc.end();
   } catch (error) {
     console.error('Export teachers PDF error:', error);
-    res.status(500).json({ error: 'Failed to export teachers PDF' });
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to export teachers PDF',
+      message: error.message
+    });
   }
 });
 
