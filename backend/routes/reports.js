@@ -603,9 +603,9 @@ router.get('/export-excel', authenticateToken, async (req, res) => {
     try {
       const teacherSalaryQuery = `
         SELECT 
-          t.full_name as "Teacher Name",
+          t.teacher_name as "Teacher Name",
           t.department as "Department",
-          t.monthly_salary_amount as "Monthly Salary",
+          t.monthly_salary as "Monthly Salary",
           tsr.total_due_this_month as "Total Due",
           tsr.amount_paid_this_month as "Amount Paid",
           tsr.outstanding_after_payment as "Outstanding",
@@ -864,9 +864,9 @@ router.get('/export-pdf', authenticateToken, async (req, res) => {
     try {
       const teacherDetailsQuery = `
         SELECT 
-          t.full_name,
+          t.teacher_name,
           t.department,
-          t.monthly_salary_amount,
+          t.monthly_salary,
           tsr.total_due_this_month,
           tsr.amount_paid_this_month,
           tsr.outstanding_after_payment,
@@ -1151,9 +1151,9 @@ router.get('/export-pdf', authenticateToken, async (req, res) => {
         }
 
         doc.fontSize(9);
-        doc.text(row.full_name || '-', 50, teacherY, { width: 130 });
+        doc.text(row.teacher_name || '-', 50, teacherY, { width: 130 });
         doc.text(row.department || '-', 180, teacherY, { width: 100 });
-        doc.text(`$${parseFloat(row.monthly_salary_amount || 0).toFixed(2)}`, 280, teacherY, { width: 70 });
+        doc.text(`$${parseFloat(row.monthly_salary || 0).toFixed(2)}`, 280, teacherY, { width: 70 });
         doc.text(`$${parseFloat(row.amount_paid_this_month || 0).toFixed(2)}`, 350, teacherY, { width: 70 });
         doc.text(`$${parseFloat(row.outstanding_after_payment || 0).toFixed(2)}`, 420, teacherY, { width: 85 });
         doc.text(row.status || '-', 505, teacherY, { width: 40 });
