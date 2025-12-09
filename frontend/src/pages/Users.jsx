@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
-import { PlusIcon, PencilIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, PencilIcon, XMarkIcon, CheckCircleIcon } from '@heroicons/react/24/outline'
 
 export default function Users() {
   const { user: currentUser } = useAuth()
@@ -73,6 +73,27 @@ export default function Users() {
     } catch (error) {
       toast.error('Failed to update user status')
     }
+  }
+
+  // Define role permissions
+  const rolePermissions = {
+    admin: [
+      'Dashboard',
+      'Parents',
+      'Collect Fee',
+      'Teachers',
+      'Pay Teacher Salary',
+      'Expenses',
+      'Month Setup',
+      'Reports',
+      'Users'
+    ],
+    cashier: [
+      'Dashboard',
+      'Parents',
+      'Collect Fee',
+      'Reports'
+    ]
   }
 
   if (currentUser?.role !== 'admin') {
@@ -215,6 +236,32 @@ export default function Users() {
                   <option value="admin">Admin</option>
                 </select>
               </div>
+
+              {/* Permissions Preview */}
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <h3 className="text-sm font-semibold text-gray-900 mb-2">
+                  {formData.role === 'admin' ? 'Admin' : 'Cashier'} Access Permissions
+                </h3>
+                <p className="text-xs text-gray-600 mb-3">
+                  This role will have access to the following pages:
+                </p>
+                <div className="space-y-2">
+                  {rolePermissions[formData.role].map((page) => (
+                    <div key={page} className="flex items-center gap-2">
+                      <CheckCircleIcon className="h-4 w-4 text-green-600 flex-shrink-0" />
+                      <span className="text-sm text-gray-700">{page}</span>
+                    </div>
+                  ))}
+                </div>
+                {formData.role === 'cashier' && (
+                  <div className="mt-3 pt-3 border-t border-gray-300">
+                    <p className="text-xs text-gray-600">
+                      <strong>Note:</strong> Cashiers have read-only access to most features. Only admins can manage teachers, expenses, month setup, and users.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="flex space-x-3 pt-4">
                 <button type="submit" className="flex-1 btn btn-primary">
                   {editingUser ? 'Update' : 'Create'} User
