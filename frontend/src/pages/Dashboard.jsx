@@ -6,7 +6,8 @@ import {
   ClockIcon,
   CheckCircleIcon,
   AcademicCapIcon,
-  BanknotesIcon
+  BanknotesIcon,
+  DocumentTextIcon
 } from '@heroicons/react/24/outline'
 import { BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
@@ -15,6 +16,7 @@ const COLORS = ['#22c55e', '#f97316', '#ef4444', '#3b82f6']
 export default function Dashboard() {
   const [summary, setSummary] = useState(null)
   const [teacherSalarySummary, setTeacherSalarySummary] = useState(null)
+  const [expensesSummary, setExpensesSummary] = useState(null)
   const [trend, setTrend] = useState([])
   const [distribution, setDistribution] = useState([])
   const [selectedMonth, setSelectedMonth] = useState('')
@@ -42,6 +44,15 @@ export default function Dashboard() {
       } catch (error) {
         console.error('Failed to fetch teacher salary summary:', error)
         setTeacherSalarySummary(null)
+      }
+      
+      // Fetch expenses summary
+      try {
+        const expensesResponse = await api.get('/expenses/summary', { params })
+        setExpensesSummary(expensesResponse.data.summary)
+      } catch (error) {
+        console.error('Failed to fetch expenses summary:', error)
+        setExpensesSummary(null)
       }
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error)
@@ -113,6 +124,16 @@ export default function Dashboard() {
     }
   ]
 
+  const expensesCards = [
+    {
+      title: 'Total Expenses',
+      value: `$${parseFloat(expensesSummary?.total_expenses || 0).toLocaleString()}`,
+      icon: DocumentTextIcon,
+      color: 'text-orange-600',
+      bgColor: 'bg-orange-50'
+    }
+  ]
+
   return (
     <div className="w-full max-w-full space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -156,6 +177,28 @@ export default function Dashboard() {
           <h2 className="text-lg font-semibold text-gray-900 mb-3">Teacher Salary Summary</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 w-full">
             {teacherSalaryCards.map((card, index) => (
+              <div key={index} className="card hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-600 truncate">{card.title}</p>
+                    <p className={`text-xl sm:text-2xl font-bold ${card.color} mt-2 truncate`}>{card.value}</p>
+                  </div>
+                  <div className={`${card.bgColor} p-3 rounded-lg flex-shrink-0 ml-3`}>
+                    <card.icon className={`h-6 w-6 sm:h-8 sm:w-8 ${card.color}`} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Expenses KPI Cards */}
+      {expensesSummary && (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Expenses Summary</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 w-full">
+            {expensesCards.map((card, index) => (
               <div key={index} className="card hover:shadow-md transition-shadow">
                 <div className="flex items-center justify-between">
                   <div className="flex-1 min-w-0">
