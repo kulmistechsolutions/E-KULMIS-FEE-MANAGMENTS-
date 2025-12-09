@@ -4,7 +4,9 @@ import {
   CurrencyDollarIcon,
   ExclamationTriangleIcon,
   ClockIcon,
-  CheckCircleIcon
+  CheckCircleIcon,
+  AcademicCapIcon,
+  BanknotesIcon
 } from '@heroicons/react/24/outline'
 import { BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
@@ -12,6 +14,7 @@ const COLORS = ['#22c55e', '#f97316', '#ef4444', '#3b82f6']
 
 export default function Dashboard() {
   const [summary, setSummary] = useState(null)
+  const [teacherSalarySummary, setTeacherSalarySummary] = useState(null)
   const [trend, setTrend] = useState([])
   const [distribution, setDistribution] = useState([])
   const [selectedMonth, setSelectedMonth] = useState('')
@@ -25,10 +28,21 @@ export default function Dashboard() {
     try {
       setLoading(true)
       const params = selectedMonth ? { month: selectedMonth } : {}
-      const response = await api.get('/reports/summary', { params })
-      setSummary(response.data.summary)
-      setTrend(response.data.trend)
-      setDistribution(response.data.distribution)
+      
+      // Fetch parent fees summary
+      const summaryResponse = await api.get('/reports/summary', { params })
+      setSummary(summaryResponse.data.summary)
+      setTrend(summaryResponse.data.trend)
+      setDistribution(summaryResponse.data.distribution)
+      
+      // Fetch teacher salary summary
+      try {
+        const salaryResponse = await api.get('/teachers/salary/summary', { params })
+        setTeacherSalarySummary(salaryResponse.data.summary)
+      } catch (error) {
+        console.error('Failed to fetch teacher salary summary:', error)
+        setTeacherSalarySummary(null)
+      }
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error)
     } finally {
@@ -75,6 +89,30 @@ export default function Dashboard() {
     }
   ]
 
+  const teacherSalaryCards = [
+    {
+      title: 'Total Teachers',
+      value: teacherSalarySummary?.total_teachers || 0,
+      icon: AcademicCapIcon,
+      color: 'text-purple-600',
+      bgColor: 'bg-purple-50'
+    },
+    {
+      title: 'Total Salary Paid This Month',
+      value: `$${parseFloat(teacherSalarySummary?.total_salary_paid || 0).toLocaleString()}`,
+      icon: BanknotesIcon,
+      color: 'text-green-600',
+      bgColor: 'bg-green-50'
+    },
+    {
+      title: 'Total Outstanding This Month',
+      value: `$${parseFloat(teacherSalarySummary?.total_salary_outstanding || 0).toLocaleString()}`,
+      icon: ExclamationTriangleIcon,
+      color: 'text-red-600',
+      bgColor: 'bg-red-50'
+    }
+  ]
+
   return (
     <div className="w-full max-w-full space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -92,22 +130,47 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 w-full">
-        {kpiCards.map((card, index) => (
-          <div key={index} className="card hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-600 truncate">{card.title}</p>
-                <p className={`text-xl sm:text-2xl font-bold ${card.color} mt-2 truncate`}>{card.value}</p>
-              </div>
-              <div className={`${card.bgColor} p-3 rounded-lg flex-shrink-0 ml-3`}>
-                <card.icon className={`h-6 w-6 sm:h-8 sm:w-8 ${card.color}`} />
+      {/* Parent Fees KPI Cards */}
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900 mb-3">Parent Fees Summary</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 w-full">
+          {kpiCards.map((card, index) => (
+            <div key={index} className="card hover:shadow-md transition-shadow">
+              <div className="flex items-center justify-between">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-600 truncate">{card.title}</p>
+                  <p className={`text-xl sm:text-2xl font-bold ${card.color} mt-2 truncate`}>{card.value}</p>
+                </div>
+                <div className={`${card.bgColor} p-3 rounded-lg flex-shrink-0 ml-3`}>
+                  <card.icon className={`h-6 w-6 sm:h-8 sm:w-8 ${card.color}`} />
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
+
+      {/* Teacher Salary KPI Cards */}
+      {teacherSalarySummary && (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Teacher Salary Summary</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 w-full">
+            {teacherSalaryCards.map((card, index) => (
+              <div key={index} className="card hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-600 truncate">{card.title}</p>
+                    <p className={`text-xl sm:text-2xl font-bold ${card.color} mt-2 truncate`}>{card.value}</p>
+                  </div>
+                  <div className={`${card.bgColor} p-3 rounded-lg flex-shrink-0 ml-3`}>
+                    <card.icon className={`h-6 w-6 sm:h-8 sm:w-8 ${card.color}`} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 w-full">
