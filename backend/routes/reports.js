@@ -203,18 +203,33 @@ router.get('/export-excel', authenticateToken, async (req, res) => {
 
     const expensesResult = await pool.query(expensesQuery, month ? expenseParams : []);
 
-    // 4. Summary Sheet
+    // 4. Summary Sheet - Get expenses separately to avoid complex subquery
+    let expensesSummaryQuery = `
+      SELECT COALESCE(SUM(e.amount), 0) as total_expenses
+      FROM expenses e
+      LEFT JOIN billing_months bm ON e.billing_month_id = bm.id
+    `;
+    const expensesSummaryParams = [];
+    if (month) {
+      const [year, monthNum] = month.split('-');
+      expensesSummaryQuery += ' WHERE (bm.year = $1 AND bm.month = $2) OR (bm.id IS NULL AND EXTRACT(YEAR FROM e.expense_date) = $1 AND EXTRACT(MONTH FROM e.expense_date) = $2)';
+      expensesSummaryParams.push(year, monthNum);
+    } else {
+      expensesSummaryQuery += ' WHERE bm.is_active = true OR bm.id IS NULL';
+    }
+    const expensesSummaryResult = await pool.query(expensesSummaryQuery, expensesSummaryParams);
+    const totalExpenses = parseFloat(expensesSummaryResult.rows[0]?.total_expenses || 0);
+
+    // Get summary data
     const summaryData = await pool.query(
       `SELECT 
-        COUNT(DISTINCT p.id) as "Total Parents",
-        COUNT(DISTINCT t.id) as "Total Teachers",
-        SUM(pmf.amount_paid_this_month) as "Total Fees Collected",
-        SUM(pmf.outstanding_after_payment) as "Total Outstanding Fees",
-        SUM(tsr.total_due_this_month) as "Total Salary Required",
-        SUM(tsr.amount_paid_this_month) as "Total Salary Paid",
-        SUM(tsr.outstanding_after_payment) as "Total Salary Outstanding",
-        (SELECT COALESCE(SUM(e.amount), 0) FROM expenses e LEFT JOIN billing_months bm2 ON e.billing_month_id = bm2.id ${monthQuery.replace('bm.', 'bm2.')}) as "Total Expenses",
-        (SUM(pmf.amount_paid_this_month) - SUM(tsr.amount_paid_this_month) - (SELECT COALESCE(SUM(e.amount), 0) FROM expenses e LEFT JOIN billing_months bm2 ON e.billing_month_id = bm2.id ${monthQuery.replace('bm.', 'bm2.')})) as "Net Balance"
+        COALESCE(COUNT(DISTINCT p.id), 0) as "Total Parents",
+        COALESCE(COUNT(DISTINCT t.id), 0) as "Total Teachers",
+        COALESCE(SUM(pmf.amount_paid_this_month), 0) as "Total Fees Collected",
+        COALESCE(SUM(pmf.outstanding_after_payment), 0) as "Total Outstanding Fees",
+        COALESCE(SUM(tsr.total_due_this_month), 0) as "Total Salary Required",
+        COALESCE(SUM(tsr.amount_paid_this_month), 0) as "Total Salary Paid",
+        COALESCE(SUM(tsr.outstanding_after_payment), 0) as "Total Salary Outstanding"
       FROM parent_month_fee pmf
       JOIN billing_months bm ON pmf.billing_month_id = bm.id
       JOIN parents p ON pmf.parent_id = p.id
@@ -224,11 +239,22 @@ router.get('/export-excel', authenticateToken, async (req, res) => {
       params
     );
 
+    // Calculate net balance
+    const summaryRow = summaryData.rows[0] || {};
+    const totalFeesCollected = parseFloat(summaryRow['Total Fees Collected'] || 0);
+    const totalSalaryPaid = parseFloat(summaryRow['Total Salary Paid'] || 0);
+    const netBalance = totalFeesCollected - totalSalaryPaid - totalExpenses;
+
+    // Add expenses and net balance to summary
+    summaryRow['Total Expenses'] = totalExpenses;
+    summaryRow['Net Balance'] = netBalance;
+
     // Create workbook with multiple sheets
     const workbook = xlsx.utils.book_new();
     
-    // Summary sheet
-    const summarySheet = xlsx.utils.json_to_sheet(summaryData.rows);
+    // Summary sheet - convert single row object to array format
+    const summaryArray = [summaryRow];
+    const summarySheet = xlsx.utils.json_to_sheet(summaryArray);
     xlsx.utils.book_append_sheet(workbook, summarySheet, 'Summary');
     
     // Parent Fee Records sheet
@@ -257,7 +283,11 @@ router.get('/export-excel', authenticateToken, async (req, res) => {
     res.send(buffer);
   } catch (error) {
     console.error('Export Excel error:', error);
-    res.status(500).json({ error: 'Failed to export Excel' });
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to export Excel',
+      message: process.env.NODE_ENV === 'development' ? error.message : 'An error occurred while exporting. Please try again.'
+    });
   }
 });
 
