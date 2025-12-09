@@ -53,7 +53,7 @@ export default function Reports() {
       const url = window.URL.createObjectURL(new Blob([response.data]))
       const link = document.createElement('a')
       link.href = url
-      link.setAttribute('download', `fee-records-${selectedMonth || 'active'}.xlsx`)
+      link.setAttribute('download', `complete-report-${selectedMonth || 'active'}.xlsx`)
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -75,7 +75,7 @@ export default function Reports() {
       const url = window.URL.createObjectURL(new Blob([response.data]))
       const link = document.createElement('a')
       link.href = url
-      link.setAttribute('download', `financial-report-${selectedMonth || 'active'}.pdf`)
+      link.setAttribute('download', `complete-report-${selectedMonth || 'active'}.pdf`)
       document.body.appendChild(link)
       link.click()
       link.remove()

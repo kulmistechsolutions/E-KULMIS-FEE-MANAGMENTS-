@@ -121,7 +121,21 @@ router.get('/export-excel', authenticateToken, async (req, res) => {
   try {
     const { month } = req.query; // Format: YYYY-MM
 
-    let query = `
+    let monthQuery = '';
+    const params = [];
+    let paramIndex = 1;
+
+    if (month) {
+      const [year, monthNum] = month.split('-');
+      monthQuery = 'WHERE bm.year = $1 AND bm.month = $2';
+      params.push(year, monthNum);
+      paramIndex = 3;
+    } else {
+      monthQuery = 'WHERE bm.is_active = true';
+    }
+
+    // 1. Parent Fee Records
+    const parentQuery = `
       SELECT 
         p.parent_name as "Parent Name",
         p.phone_number as "Phone",
@@ -135,31 +149,111 @@ router.get('/export-excel', authenticateToken, async (req, res) => {
       FROM parent_month_fee pmf
       JOIN parents p ON pmf.parent_id = p.id
       JOIN billing_months bm ON pmf.billing_month_id = bm.id
+      ${monthQuery}
+      ORDER BY p.parent_name
     `;
 
-    const params = [];
+    const parentResult = await pool.query(parentQuery, params);
+
+    // 2. Teacher Salary Records
+    const teacherSalaryQuery = `
+      SELECT 
+        t.full_name as "Teacher Name",
+        t.department as "Department",
+        t.monthly_salary_amount as "Monthly Salary",
+        tsr.total_due_this_month as "Total Due",
+        tsr.amount_paid_this_month as "Amount Paid",
+        tsr.outstanding_after_payment as "Outstanding",
+        tsr.status as "Status",
+        bm.year as "Year",
+        bm.month as "Month"
+      FROM teacher_salary_records tsr
+      JOIN teachers t ON tsr.teacher_id = t.id
+      JOIN billing_months bm ON tsr.billing_month_id = bm.id
+      ${monthQuery}
+      ORDER BY t.full_name
+    `;
+
+    const teacherSalaryResult = await pool.query(teacherSalaryQuery, params);
+
+    // 3. Expenses List
+    let expensesQuery = `
+      SELECT 
+        e.expense_date as "Date",
+        ec.category_name as "Category",
+        e.amount as "Amount",
+        e.notes as "Notes/Description",
+        bm.year as "Year",
+        bm.month as "Month"
+      FROM expenses e
+      JOIN expense_categories ec ON e.category_id = ec.id
+      LEFT JOIN billing_months bm ON e.billing_month_id = bm.id
+    `;
+
+    const expenseParams = [];
     if (month) {
       const [year, monthNum] = month.split('-');
-      query += ' WHERE bm.year = $1 AND bm.month = $2';
-      params.push(year, monthNum);
+      expensesQuery += ' WHERE (bm.year = $1 AND bm.month = $2) OR (bm.id IS NULL AND EXTRACT(YEAR FROM e.expense_date) = $1 AND EXTRACT(MONTH FROM e.expense_date) = $2)';
+      expenseParams.push(year, monthNum);
     } else {
-      query += ' WHERE bm.is_active = true';
+      expensesQuery += ' WHERE bm.is_active = true OR bm.id IS NULL';
     }
 
-    query += ' ORDER BY p.parent_name';
+    expensesQuery += ' ORDER BY e.expense_date DESC';
 
-    const result = await pool.query(query, params);
+    const expensesResult = await pool.query(expensesQuery, month ? expenseParams : []);
 
-    // Create workbook
+    // 4. Summary Sheet
+    const summaryData = await pool.query(
+      `SELECT 
+        COUNT(DISTINCT p.id) as "Total Parents",
+        COUNT(DISTINCT t.id) as "Total Teachers",
+        SUM(pmf.amount_paid_this_month) as "Total Fees Collected",
+        SUM(pmf.outstanding_after_payment) as "Total Outstanding Fees",
+        SUM(tsr.total_due_this_month) as "Total Salary Required",
+        SUM(tsr.amount_paid_this_month) as "Total Salary Paid",
+        SUM(tsr.outstanding_after_payment) as "Total Salary Outstanding",
+        (SELECT COALESCE(SUM(e.amount), 0) FROM expenses e LEFT JOIN billing_months bm2 ON e.billing_month_id = bm2.id ${monthQuery.replace('bm.', 'bm2.')}) as "Total Expenses",
+        (SUM(pmf.amount_paid_this_month) - SUM(tsr.amount_paid_this_month) - (SELECT COALESCE(SUM(e.amount), 0) FROM expenses e LEFT JOIN billing_months bm2 ON e.billing_month_id = bm2.id ${monthQuery.replace('bm.', 'bm2.')})) as "Net Balance"
+      FROM parent_month_fee pmf
+      JOIN billing_months bm ON pmf.billing_month_id = bm.id
+      JOIN parents p ON pmf.parent_id = p.id
+      LEFT JOIN teacher_salary_records tsr ON tsr.billing_month_id = bm.id
+      LEFT JOIN teachers t ON tsr.teacher_id = t.id
+      ${monthQuery}`,
+      params
+    );
+
+    // Create workbook with multiple sheets
     const workbook = xlsx.utils.book_new();
-    const worksheet = xlsx.utils.json_to_sheet(result.rows);
-    xlsx.utils.book_append_sheet(workbook, worksheet, 'Fee Records');
+    
+    // Summary sheet
+    const summarySheet = xlsx.utils.json_to_sheet(summaryData.rows);
+    xlsx.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+    
+    // Parent Fee Records sheet
+    if (parentResult.rows.length > 0) {
+      const parentSheet = xlsx.utils.json_to_sheet(parentResult.rows);
+      xlsx.utils.book_append_sheet(workbook, parentSheet, 'Parent Fees');
+    }
+    
+    // Teacher Salary Records sheet
+    if (teacherSalaryResult.rows.length > 0) {
+      const teacherSheet = xlsx.utils.json_to_sheet(teacherSalaryResult.rows);
+      xlsx.utils.book_append_sheet(workbook, teacherSheet, 'Teacher Salaries');
+    }
+    
+    // Expenses sheet
+    if (expensesResult.rows.length > 0) {
+      const expensesSheet = xlsx.utils.json_to_sheet(expensesResult.rows);
+      xlsx.utils.book_append_sheet(workbook, expensesSheet, 'Expenses');
+    }
 
     // Generate buffer
     const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=fee-records-${month || 'active'}.xlsx`);
+    res.setHeader('Content-Disposition', `attachment; filename=complete-report-${month || 'active'}.xlsx`);
     res.send(buffer);
   } catch (error) {
     console.error('Export Excel error:', error);
@@ -230,6 +324,66 @@ router.get('/export-pdf', authenticateToken, async (req, res) => {
     const totalExpenses = parseFloat(expenseData.total_expenses || 0);
     const netBalance = totalIncome - totalSalaryPaid - totalExpenses;
 
+    // Get detailed parent fee records
+    const parentDetailsQuery = `
+      SELECT 
+        p.parent_name,
+        p.phone_number,
+        p.monthly_fee_amount,
+        pmf.amount_paid_this_month,
+        pmf.outstanding_after_payment,
+        pmf.status
+      FROM parent_month_fee pmf
+      JOIN parents p ON pmf.parent_id = p.id
+      JOIN billing_months bm ON pmf.billing_month_id = bm.id
+      ${monthQuery}
+      ORDER BY p.parent_name
+      LIMIT 100
+    `;
+    const parentDetailsResult = await pool.query(parentDetailsQuery, params);
+
+    // Get detailed teacher salary records
+    const teacherDetailsQuery = `
+      SELECT 
+        t.full_name,
+        t.department,
+        t.monthly_salary_amount,
+        tsr.total_due_this_month,
+        tsr.amount_paid_this_month,
+        tsr.outstanding_after_payment,
+        tsr.status
+      FROM teacher_salary_records tsr
+      JOIN teachers t ON tsr.teacher_id = t.id
+      JOIN billing_months bm ON tsr.billing_month_id = bm.id
+      ${monthQuery}
+      ORDER BY t.full_name
+      LIMIT 100
+    `;
+    const teacherDetailsResult = await pool.query(teacherDetailsQuery, params);
+
+    // Get detailed expenses
+    let expensesDetailsQuery = `
+      SELECT 
+        e.expense_date,
+        ec.category_name,
+        e.amount,
+        e.notes
+      FROM expenses e
+      JOIN expense_categories ec ON e.category_id = ec.id
+      LEFT JOIN billing_months bm ON e.billing_month_id = bm.id
+    `;
+    if (month) {
+      const [year, monthNum] = month.split('-');
+      expensesDetailsQuery += ' WHERE (bm.year = $1 AND bm.month = $2) OR (bm.id IS NULL AND EXTRACT(YEAR FROM e.expense_date) = $1 AND EXTRACT(MONTH FROM e.expense_date) = $2)';
+      expensesDetailsQuery += ' ORDER BY e.expense_date DESC LIMIT 100';
+      const expenseParams = [year, monthNum];
+      var expensesDetailsResult = await pool.query(expensesDetailsQuery, expenseParams);
+    } else {
+      expensesDetailsQuery += ' WHERE bm.is_active = true OR bm.id IS NULL';
+      expensesDetailsQuery += ' ORDER BY e.expense_date DESC LIMIT 100';
+      var expensesDetailsResult = await pool.query(expensesDetailsQuery);
+    }
+
     // Get month info
     let monthInfo = 'Current Active Month';
     if (month) {
@@ -241,14 +395,14 @@ router.get('/export-pdf', authenticateToken, async (req, res) => {
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
     
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=financial-report-${month || 'active'}.pdf`);
+    res.setHeader('Content-Disposition', `attachment; filename=complete-report-${month || 'active'}.pdf`);
 
     doc.pipe(res);
 
     // Header
     doc.fontSize(20).font('Helvetica-Bold').text('Rowdatul Iimaan School', { align: 'center' });
     doc.moveDown(0.5);
-    doc.fontSize(16).font('Helvetica').text('Financial Report', { align: 'center' });
+    doc.fontSize(16).font('Helvetica').text('Complete Financial Report', { align: 'center' });
     doc.fontSize(12).text(`Period: ${monthInfo}`, { align: 'center' });
     doc.moveDown(1);
     doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
@@ -342,14 +496,183 @@ router.get('/export-pdf', authenticateToken, async (req, res) => {
     doc.text(`$${netBalance.toLocaleString()}`, 250, doc.y, { width: 300 });
     doc.fillColor('#000000');
 
-    doc.moveDown(2);
+    doc.moveDown(1.5);
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(1);
+
+    // Detailed Parent Fees Section
+    if (parentDetailsResult.rows.length > 0) {
+      doc.fontSize(14).font('Helvetica-Bold').text('Detailed Parent Fee Records', 50, doc.y);
+      doc.moveDown(0.5);
+      doc.fontSize(9).font('Helvetica');
+      
+      // Table headers
+      const startY = doc.y;
+      doc.font('Helvetica-Bold');
+      doc.text('Parent Name', 50, doc.y, { width: 120 });
+      doc.text('Phone', 170, doc.y, { width: 80 });
+      doc.text('Fee', 250, doc.y, { width: 60 });
+      doc.text('Paid', 310, doc.y, { width: 60 });
+      doc.text('Outstanding', 370, doc.y, { width: 70 });
+      doc.text('Status', 440, doc.y, { width: 60 });
+      doc.font('Helvetica');
+      doc.moveDown(0.3);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+      doc.moveDown(0.2);
+
+      let currentY = doc.y;
+      parentDetailsResult.rows.forEach((row, index) => {
+        if (currentY > 700) {
+          doc.addPage();
+          currentY = 50;
+          doc.fontSize(9).font('Helvetica-Bold');
+          doc.text('Parent Name', 50, currentY, { width: 120 });
+          doc.text('Phone', 170, currentY, { width: 80 });
+          doc.text('Fee', 250, currentY, { width: 60 });
+          doc.text('Paid', 310, currentY, { width: 60 });
+          doc.text('Outstanding', 370, currentY, { width: 70 });
+          doc.text('Status', 440, currentY, { width: 60 });
+          doc.font('Helvetica');
+          currentY += 15;
+          doc.moveTo(50, currentY).lineTo(545, currentY).stroke();
+          currentY += 10;
+        }
+
+        doc.fontSize(8);
+        doc.text(row.parent_name || '-', 50, currentY, { width: 120 });
+        doc.text(row.phone_number || '-', 170, currentY, { width: 80 });
+        doc.text(`$${parseFloat(row.monthly_fee_amount || 0).toFixed(2)}`, 250, currentY, { width: 60 });
+        doc.text(`$${parseFloat(row.amount_paid_this_month || 0).toFixed(2)}`, 310, currentY, { width: 60 });
+        doc.text(`$${parseFloat(row.outstanding_after_payment || 0).toFixed(2)}`, 370, currentY, { width: 70 });
+        doc.text(row.status || '-', 440, currentY, { width: 60 });
+        currentY += 12;
+      });
+
+      doc.y = currentY;
+      doc.moveDown(1);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+      doc.moveDown(1);
+    }
+
+    // Detailed Teacher Salary Section
+    if (teacherDetailsResult.rows.length > 0) {
+      if (doc.y > 650) {
+        doc.addPage();
+        doc.y = 50;
+      }
+
+      doc.fontSize(14).font('Helvetica-Bold').text('Detailed Teacher Salary Records', 50, doc.y);
+      doc.moveDown(0.5);
+      doc.fontSize(9).font('Helvetica');
+      
+      doc.font('Helvetica-Bold');
+      const teacherStartY = doc.y;
+      doc.text('Teacher Name', 50, doc.y, { width: 120 });
+      doc.text('Department', 170, doc.y, { width: 100 });
+      doc.text('Salary', 270, doc.y, { width: 60 });
+      doc.text('Paid', 330, doc.y, { width: 60 });
+      doc.text('Outstanding', 390, doc.y, { width: 70 });
+      doc.text('Status', 460, doc.y, { width: 60 });
+      doc.font('Helvetica');
+      doc.moveDown(0.3);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+      doc.moveDown(0.2);
+
+      let teacherY = doc.y;
+      teacherDetailsResult.rows.forEach((row) => {
+        if (teacherY > 700) {
+          doc.addPage();
+          teacherY = 50;
+          doc.fontSize(9).font('Helvetica-Bold');
+          doc.text('Teacher Name', 50, teacherY, { width: 120 });
+          doc.text('Department', 170, teacherY, { width: 100 });
+          doc.text('Salary', 270, teacherY, { width: 60 });
+          doc.text('Paid', 330, teacherY, { width: 60 });
+          doc.text('Outstanding', 390, teacherY, { width: 70 });
+          doc.text('Status', 460, teacherY, { width: 60 });
+          doc.font('Helvetica');
+          teacherY += 15;
+          doc.moveTo(50, teacherY).lineTo(545, teacherY).stroke();
+          teacherY += 10;
+        }
+
+        doc.fontSize(8);
+        doc.text(row.full_name || '-', 50, teacherY, { width: 120 });
+        doc.text(row.department || '-', 170, teacherY, { width: 100 });
+        doc.text(`$${parseFloat(row.monthly_salary_amount || 0).toFixed(2)}`, 270, teacherY, { width: 60 });
+        doc.text(`$${parseFloat(row.amount_paid_this_month || 0).toFixed(2)}`, 330, teacherY, { width: 60 });
+        doc.text(`$${parseFloat(row.outstanding_after_payment || 0).toFixed(2)}`, 390, teacherY, { width: 70 });
+        doc.text(row.status || '-', 460, teacherY, { width: 60 });
+        teacherY += 12;
+      });
+
+      doc.y = teacherY;
+      doc.moveDown(1);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+      doc.moveDown(1);
+    }
+
+    // Detailed Expenses Section
+    if (expensesDetailsResult.rows.length > 0) {
+      if (doc.y > 650) {
+        doc.addPage();
+        doc.y = 50;
+      }
+
+      doc.fontSize(14).font('Helvetica-Bold').text('Detailed Expenses', 50, doc.y);
+      doc.moveDown(0.5);
+      doc.fontSize(9).font('Helvetica');
+      
+      doc.font('Helvetica-Bold');
+      const expenseStartY = doc.y;
+      doc.text('Date', 50, doc.y, { width: 80 });
+      doc.text('Category', 130, doc.y, { width: 100 });
+      doc.text('Amount', 230, doc.y, { width: 70 });
+      doc.text('Description', 300, doc.y, { width: 200 });
+      doc.font('Helvetica');
+      doc.moveDown(0.3);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+      doc.moveDown(0.2);
+
+      let expenseY = doc.y;
+      expensesDetailsResult.rows.forEach((row) => {
+        if (expenseY > 700) {
+          doc.addPage();
+          expenseY = 50;
+          doc.fontSize(9).font('Helvetica-Bold');
+          doc.text('Date', 50, expenseY, { width: 80 });
+          doc.text('Category', 130, expenseY, { width: 100 });
+          doc.text('Amount', 230, expenseY, { width: 70 });
+          doc.text('Description', 300, expenseY, { width: 200 });
+          doc.font('Helvetica');
+          expenseY += 15;
+          doc.moveTo(50, expenseY).lineTo(545, expenseY).stroke();
+          expenseY += 10;
+        }
+
+        doc.fontSize(8);
+        const expenseDate = row.expense_date ? new Date(row.expense_date).toLocaleDateString() : '-';
+        doc.text(expenseDate, 50, expenseY, { width: 80 });
+        doc.text(row.category_name || '-', 130, expenseY, { width: 100 });
+        doc.text(`$${parseFloat(row.amount || 0).toFixed(2)}`, 230, expenseY, { width: 70 });
+        doc.text(row.notes || '-', 300, expenseY, { width: 200 });
+        expenseY += 12;
+      });
+
+      doc.y = expenseY;
+      doc.moveDown(1);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+      doc.moveDown(1);
+    }
+
+    doc.moveDown(1);
     doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
     doc.moveDown(1);
 
     // Footer
     doc.fontSize(10).font('Helvetica').text(`Generated on: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, { align: 'center' });
     doc.moveDown(0.5);
-    doc.fontSize(8).text('This is a computer-generated report.', { align: 'center' });
+    doc.fontSize(8).text('This is a computer-generated report containing all financial data.', { align: 'center' });
 
     doc.end();
   } catch (error) {
