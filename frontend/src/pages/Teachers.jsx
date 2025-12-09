@@ -76,9 +76,14 @@ export default function Teachers() {
       toast.success('Teacher deleted')
     }
 
+    const handleTeacherImported = () => {
+      fetchTeachers()
+    }
+
     socket.on('teacher:created', handleTeacherCreated)
     socket.on('teacher:updated', handleTeacherUpdated)
     socket.on('teacher:deleted', handleTeacherDeleted)
+    socket.on('teacher:imported', handleTeacherImported)
 
     return () => {
       socket.off('teacher:created', handleTeacherCreated)
