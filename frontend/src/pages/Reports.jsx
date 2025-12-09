@@ -94,105 +94,114 @@ export default function Reports() {
           />
         </div>
 
-        {/* Export Buttons Section */}
-        <div className="card p-4 sm:p-6">
-          <h2 className="text-lg font-bold text-gray-900 mb-4">Export Reports</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* Parents Export */}
-            <div className="border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <UsersIcon className="h-5 w-5 text-primary-600" />
-                <h3 className="font-semibold text-gray-900">Parents</h3>
-              </div>
-              <div className="flex flex-col gap-2">
+        {/* All Reports Export - Prominent Section */}
+        <div className="card p-4 sm:p-6 border-2 border-primary-200 bg-primary-50">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 mb-4">
+            <h2 className="text-lg sm:text-xl font-bold text-primary-800 flex items-center">
+              <Square3Stack3DIcon className="h-5 w-5 sm:h-6 sm:w-6 mr-2 sm:mr-3 text-primary-600" />
+              All Financial Reports
+            </h2>
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              <button onClick={() => handleExport('all', 'excel')} className="btn btn-primary text-sm w-full sm:w-auto">
+                <ArrowDownTrayIcon className="h-4 w-4 mr-2" /> Excel
+              </button>
+              <button onClick={() => handleExport('all', 'pdf')} className="btn btn-outline text-sm w-full sm:w-auto">
+                <DocumentArrowDownIcon className="h-4 w-4 mr-2" /> PDF
+              </button>
+            </div>
+          </div>
+          <p className="text-xs sm:text-sm text-primary-700">
+            Download a comprehensive report including all parent fees, teacher salaries, and expenses.
+          </p>
+        </div>
+
+        {/* Separate Export Sections */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+          {/* Parents Export */}
+          <div className="card p-4 sm:p-6">
+            <div className="flex justify-between items-center mb-3 sm:mb-4">
+              <h3 className="text-base sm:text-lg font-bold text-gray-900 flex items-center">
+                <UsersIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-2 text-blue-600" />
+                Parents Fees
+              </h3>
+              <div className="flex gap-2">
                 <button 
                   onClick={() => handleExport('parents', 'excel')} 
-                  className="btn btn-outline text-sm w-full"
+                  className="btn btn-primary btn-sm text-xs sm:text-sm"
+                  title="Export Parents to Excel"
                 >
-                  <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
-                  Excel
+                  <ArrowDownTrayIcon className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Excel</span>
                 </button>
                 <button 
                   onClick={() => handleExport('parents', 'pdf')} 
-                  className="btn btn-outline text-sm w-full"
+                  className="btn btn-outline btn-sm text-xs sm:text-sm"
+                  title="Export Parents to PDF"
                 >
-                  <DocumentArrowDownIcon className="h-4 w-4 mr-2" />
-                  PDF
+                  <DocumentArrowDownIcon className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">PDF</span>
                 </button>
               </div>
             </div>
+            <p className="text-xs sm:text-sm text-gray-600">Export detailed parent fee records.</p>
+          </div>
 
-            {/* Teachers Export */}
-            <div className="border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <AcademicCapIcon className="h-5 w-5 text-green-600" />
-                <h3 className="font-semibold text-gray-900">Teachers</h3>
-              </div>
-              <div className="flex flex-col gap-2">
+          {/* Teachers Export */}
+          <div className="card p-4 sm:p-6">
+            <div className="flex justify-between items-center mb-3 sm:mb-4">
+              <h3 className="text-base sm:text-lg font-bold text-gray-900 flex items-center">
+                <AcademicCapIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-2 text-green-600" />
+                Teacher Salaries
+              </h3>
+              <div className="flex gap-2">
                 <button 
                   onClick={() => handleExport('teachers', 'excel')} 
-                  className="btn btn-outline text-sm w-full"
+                  className="btn btn-primary btn-sm text-xs sm:text-sm"
+                  title="Export Teachers to Excel"
                 >
-                  <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
-                  Excel
+                  <ArrowDownTrayIcon className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Excel</span>
                 </button>
                 <button 
                   onClick={() => handleExport('teachers', 'pdf')} 
-                  className="btn btn-outline text-sm w-full"
+                  className="btn btn-outline btn-sm text-xs sm:text-sm"
+                  title="Export Teachers to PDF"
                 >
-                  <DocumentArrowDownIcon className="h-4 w-4 mr-2" />
-                  PDF
+                  <DocumentArrowDownIcon className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">PDF</span>
                 </button>
               </div>
             </div>
+            <p className="text-xs sm:text-sm text-gray-600">Export detailed teacher salary records.</p>
+          </div>
 
-            {/* Expenses Export */}
-            <div className="border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <ReceiptPercentIcon className="h-5 w-5 text-orange-600" />
-                <h3 className="font-semibold text-gray-900">Expenses</h3>
-              </div>
-              <div className="flex flex-col gap-2">
+          {/* Expenses Export */}
+          <div className="card p-4 sm:p-6">
+            <div className="flex justify-between items-center mb-3 sm:mb-4">
+              <h3 className="text-base sm:text-lg font-bold text-gray-900 flex items-center">
+                <ReceiptPercentIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-2 text-orange-600" />
+                Expenses
+              </h3>
+              <div className="flex gap-2">
                 <button 
                   onClick={() => handleExport('expenses', 'excel')} 
-                  className="btn btn-outline text-sm w-full"
+                  className="btn btn-primary btn-sm text-xs sm:text-sm"
+                  title="Export Expenses to Excel"
                 >
-                  <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
-                  Excel
+                  <ArrowDownTrayIcon className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Excel</span>
                 </button>
                 <button 
                   onClick={() => handleExport('expenses', 'pdf')} 
-                  className="btn btn-outline text-sm w-full"
+                  className="btn btn-outline btn-sm text-xs sm:text-sm"
+                  title="Export Expenses to PDF"
                 >
-                  <DocumentArrowDownIcon className="h-4 w-4 mr-2" />
-                  PDF
+                  <DocumentArrowDownIcon className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">PDF</span>
                 </button>
               </div>
             </div>
-
-            {/* All Reports Export */}
-            <div className="border-2 border-primary-500 rounded-lg p-4 bg-primary-50">
-              <div className="flex items-center gap-2 mb-3">
-                <Square3Stack3DIcon className="h-5 w-5 text-primary-600" />
-                <h3 className="font-semibold text-gray-900">All Reports</h3>
-              </div>
-              <div className="flex flex-col gap-2">
-                <button 
-                  onClick={() => handleExport('all', 'excel')} 
-                  className="btn btn-primary text-sm w-full"
-                >
-                  <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
-                  Excel
-                </button>
-                <button 
-                  onClick={() => handleExport('all', 'pdf')} 
-                  className="btn btn-primary text-sm w-full"
-                >
-                  <DocumentArrowDownIcon className="h-4 w-4 mr-2" />
-                  PDF
-                </button>
-              </div>
-            </div>
+            <p className="text-xs sm:text-sm text-gray-600">Export detailed expense records.</p>
           </div>
         </div>
       </div>
