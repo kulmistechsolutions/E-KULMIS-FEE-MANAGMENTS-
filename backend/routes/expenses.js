@@ -1,6 +1,6 @@
 import express from 'express';
 import pool from '../database/db.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import xlsx from 'xlsx';
 
 const router = express.Router();
@@ -16,8 +16,8 @@ router.get('/categories', authenticateToken, async (req, res) => {
   }
 });
 
-// Create expense category
-router.post('/categories', authenticateToken, async (req, res) => {
+// Create expense category - Admin only
+router.post('/categories', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { category_name, description } = req.body;
 
@@ -47,8 +47,8 @@ router.post('/categories', authenticateToken, async (req, res) => {
   }
 });
 
-// Update expense category
-router.put('/categories/:id', authenticateToken, async (req, res) => {
+// Update expense category - Admin only
+router.put('/categories/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { category_name, description } = req.body;
@@ -84,8 +84,8 @@ router.put('/categories/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Delete expense category
-router.delete('/categories/:id', authenticateToken, async (req, res) => {
+// Delete expense category - Admin only
+router.delete('/categories/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -242,7 +242,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
 });
 
 // Create expense
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { category_id, amount, expense_date, billing_month_id, notes } = req.body;
     const created_by = req.user.id;
@@ -272,7 +272,7 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // Update expense
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { category_id, amount, expense_date, billing_month_id, notes } = req.body;
@@ -307,7 +307,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 });
 
 // Delete expense
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 

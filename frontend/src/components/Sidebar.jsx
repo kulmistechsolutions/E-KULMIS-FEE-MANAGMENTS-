@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 import {
   HomeIcon,
   UsersIcon,
@@ -14,20 +15,27 @@ import {
   DocumentTextIcon
 } from '@heroicons/react/24/outline'
 
-const navigation = [
-  { name: 'Dashboard', href: '/', icon: HomeIcon },
-  { name: 'Parents', href: '/parents', icon: UsersIcon },
-  { name: 'Collect Fee', href: '/collect-fee', icon: CurrencyDollarIcon },
-  { name: 'Teachers', href: '/teachers', icon: AcademicCapIcon },
-  { name: 'Pay Teacher Salary', href: '/pay-teacher-salary', icon: BanknotesIcon },
-  { name: 'Expenses', href: '/expenses', icon: DocumentTextIcon },
-  { name: 'Month Setup', href: '/month-setup', icon: CalendarIcon },
-  { name: 'Reports', href: '/reports', icon: ChartBarIcon },
-  { name: 'Users', href: '/users', icon: UserGroupIcon },
+// All navigation items with role requirements
+const allNavigation = [
+  { name: 'Dashboard', href: '/', icon: HomeIcon, roles: ['admin', 'cashier'] },
+  { name: 'Parents', href: '/parents', icon: UsersIcon, roles: ['admin', 'cashier'] },
+  { name: 'Collect Fee', href: '/collect-fee', icon: CurrencyDollarIcon, roles: ['admin', 'cashier'] },
+  { name: 'Teachers', href: '/teachers', icon: AcademicCapIcon, roles: ['admin'] },
+  { name: 'Pay Teacher Salary', href: '/pay-teacher-salary', icon: BanknotesIcon, roles: ['admin'] },
+  { name: 'Expenses', href: '/expenses', icon: DocumentTextIcon, roles: ['admin'] },
+  { name: 'Month Setup', href: '/month-setup', icon: CalendarIcon, roles: ['admin'] },
+  { name: 'Reports', href: '/reports', icon: ChartBarIcon, roles: ['admin', 'cashier'] },
+  { name: 'Users', href: '/users', icon: UserGroupIcon, roles: ['admin'] },
 ]
 
 export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapse }) {
   const location = useLocation()
+  const { user } = useAuth()
+  
+  // Filter navigation based on user role
+  const navigation = allNavigation.filter(item => 
+    item.roles.includes(user?.role || 'cashier')
+  )
 
   return (
     <>

@@ -1,6 +1,6 @@
 import express from 'express';
 import pool from '../database/db.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -35,8 +35,8 @@ router.get('/active', authenticateToken, async (req, res) => {
   }
 });
 
-// Create new billing month (Month Setup)
-router.post('/setup', authenticateToken, async (req, res) => {
+// Create new billing month (Month Setup) - Admin only
+router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
   const client = await pool.connect();
   
   try {

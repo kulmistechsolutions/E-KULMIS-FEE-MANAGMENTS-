@@ -1,6 +1,6 @@
 import express from 'express';
 import pool from '../database/db.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -71,7 +71,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Create teacher
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { teacher_name, department, monthly_salary, phone_number, date_of_joining } = req.body;
 
@@ -99,7 +99,7 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // Update teacher
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { teacher_name, department, monthly_salary, phone_number, date_of_joining, is_active } = req.body;
@@ -135,7 +135,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 });
 
 // Delete teacher
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 

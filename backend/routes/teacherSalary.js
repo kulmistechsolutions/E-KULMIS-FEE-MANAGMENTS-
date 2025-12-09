@@ -46,7 +46,7 @@ router.get('/month/:monthId', authenticateToken, async (req, res) => {
 });
 
 // Pay teacher salary
-router.post('/pay', authenticateToken, async (req, res) => {
+router.post('/pay', authenticateToken, requireAdmin, async (req, res) => {
   const client = await pool.connect();
 
   try {

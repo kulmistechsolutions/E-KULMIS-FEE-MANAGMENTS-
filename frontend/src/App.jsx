@@ -32,6 +32,28 @@ function PrivateRoute({ children }) {
   return user ? children : <Navigate to="/login" />
 }
 
+function AdminRoute({ children }) {
+  const { user, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <Navigate to="/login" />
+  }
+
+  if (user.role !== 'admin') {
+    return <Navigate to="/" />
+  }
+
+  return children
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -49,13 +71,14 @@ function AppRoutes() {
         <Route path="parents/:id/profile" element={<ParentProfile />} />
         <Route path="parents/:id/history" element={<FeeHistory />} />
         <Route path="collect-fee" element={<CollectFee />} />
-        <Route path="teachers" element={<Teachers />} />
-        <Route path="teachers/:id/profile" element={<TeacherProfile />} />
-        <Route path="pay-teacher-salary" element={<PayTeacherSalary />} />
-        <Route path="expenses" element={<Expenses />} />
-        <Route path="month-setup" element={<MonthSetup />} />
         <Route path="reports" element={<Reports />} />
-        <Route path="users" element={<Users />} />
+        {/* Admin-only routes */}
+        <Route path="teachers" element={<AdminRoute><Teachers /></AdminRoute>} />
+        <Route path="teachers/:id/profile" element={<AdminRoute><TeacherProfile /></AdminRoute>} />
+        <Route path="pay-teacher-salary" element={<AdminRoute><PayTeacherSalary /></AdminRoute>} />
+        <Route path="expenses" element={<AdminRoute><Expenses /></AdminRoute>} />
+        <Route path="month-setup" element={<AdminRoute><MonthSetup /></AdminRoute>} />
+        <Route path="users" element={<AdminRoute><Users /></AdminRoute>} />
       </Route>
     </Routes>
   )
