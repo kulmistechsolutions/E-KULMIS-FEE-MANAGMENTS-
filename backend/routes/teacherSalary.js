@@ -1,7 +1,7 @@
 import express from 'express';
 import PDFDocument from 'pdfkit';
 import pool from '../database/db.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
