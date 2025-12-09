@@ -372,16 +372,17 @@ router.get('/export-pdf', authenticateToken, async (req, res) => {
       JOIN expense_categories ec ON e.category_id = ec.id
       LEFT JOIN billing_months bm ON e.billing_month_id = bm.id
     `;
+    let expensesDetailsResult;
     if (month) {
       const [year, monthNum] = month.split('-');
       expensesDetailsQuery += ' WHERE (bm.year = $1 AND bm.month = $2) OR (bm.id IS NULL AND EXTRACT(YEAR FROM e.expense_date) = $1 AND EXTRACT(MONTH FROM e.expense_date) = $2)';
       expensesDetailsQuery += ' ORDER BY e.expense_date DESC LIMIT 100';
       const expenseParams = [year, monthNum];
-      var expensesDetailsResult = await pool.query(expensesDetailsQuery, expenseParams);
+      expensesDetailsResult = await pool.query(expensesDetailsQuery, expenseParams);
     } else {
       expensesDetailsQuery += ' WHERE bm.is_active = true OR bm.id IS NULL';
       expensesDetailsQuery += ' ORDER BY e.expense_date DESC LIMIT 100';
-      var expensesDetailsResult = await pool.query(expensesDetailsQuery);
+      expensesDetailsResult = await pool.query(expensesDetailsQuery);
     }
 
     // Get month info
