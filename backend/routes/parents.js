@@ -172,45 +172,54 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 // Export all parents to Excel
 router.get('/export', authenticateToken, async (req, res) => {
   try {
-    // Get all parents with aggregated data
-    const query = `
-      SELECT 
-        p.id,
-        p.parent_name,
-        p.phone_number,
-        p.number_of_children,
-        p.monthly_fee_amount,
-        COALESCE(SUM(pmf.outstanding_after_payment), 0) as total_outstanding,
-        MAX(CASE WHEN bm.is_active = true THEN pmf.status END) as current_month_status,
-        p.created_at
-      FROM parents p
-      LEFT JOIN parent_month_fee pmf ON pmf.parent_id = p.id
-      LEFT JOIN billing_months bm ON pmf.billing_month_id = bm.id
-      GROUP BY p.id, p.parent_name, p.phone_number, p.number_of_children, p.monthly_fee_amount, p.created_at
-      ORDER BY p.created_at DESC
-    `;
+    // Step 1: Get all parents (simple query first)
+    const parentsQuery = await pool.query('SELECT * FROM parents ORDER BY created_at DESC');
+    const allParents = parentsQuery.rows || [];
 
-    const result = await pool.query(query);
-    const parents = result.rows || [];
-
-    // Validate we have data
-    if (!parents || parents.length === 0) {
+    if (!allParents || allParents.length === 0) {
       return res.status(404).json({ error: 'No parents found to export' });
     }
 
-    // Prepare data for Excel with null safety
-    const excelData = parents.map(parent => ({
+    // Step 2: Get outstanding amounts for each parent
+    const outstandingQuery = await pool.query(`
+      SELECT 
+        parent_id,
+        COALESCE(SUM(outstanding_after_payment), 0) as total_outstanding
+      FROM parent_month_fee
+      GROUP BY parent_id
+    `);
+    const outstandingMap = {};
+    outstandingQuery.rows.forEach(row => {
+      outstandingMap[row.parent_id] = parseFloat(row.total_outstanding || 0);
+    });
+
+    // Step 3: Get current month status for each parent
+    const statusQuery = await pool.query(`
+      SELECT 
+        pmf.parent_id,
+        pmf.status
+      FROM parent_month_fee pmf
+      JOIN billing_months bm ON pmf.billing_month_id = bm.id
+      WHERE bm.is_active = true
+    `);
+    const statusMap = {};
+    statusQuery.rows.forEach(row => {
+      statusMap[row.parent_id] = row.status;
+    });
+
+    // Step 4: Prepare data for Excel
+    const excelData = allParents.map(parent => ({
       'ID': parent.id || '',
       'Parent Name': parent.parent_name || '',
       'Phone Number': parent.phone_number || '',
       'Number of Children': parent.number_of_children || 0,
       'Monthly Fee': parseFloat(parent.monthly_fee_amount || 0).toFixed(2),
-      'Total Outstanding': parseFloat(parent.total_outstanding || 0).toFixed(2),
-      'Current Status': parent.current_month_status || 'N/A',
+      'Total Outstanding': (outstandingMap[parent.id] || 0).toFixed(2),
+      'Current Status': statusMap[parent.id] || 'N/A',
       'Date Added': parent.created_at ? new Date(parent.created_at).toLocaleDateString() : ''
     }));
 
-    // Create workbook
+    // Step 5: Create workbook
     const workbook = xlsx.utils.book_new();
     const worksheet = xlsx.utils.json_to_sheet(excelData);
     
@@ -228,13 +237,17 @@ router.get('/export', authenticateToken, async (req, res) => {
 
     xlsx.utils.book_append_sheet(workbook, worksheet, 'All Parents');
 
-    // Generate buffer
+    // Step 6: Generate buffer
     const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
-    // Set headers
+    if (!buffer || buffer.length === 0) {
+      throw new Error('Failed to generate Excel buffer');
+    }
+
+    // Step 7: Set headers and send
     const filename = `all_parents_export_${new Date().toISOString().split('T')[0]}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
     res.send(buffer);
   } catch (error) {
@@ -247,7 +260,8 @@ router.get('/export', authenticateToken, async (req, res) => {
     });
     res.status(500).json({ 
       error: 'Failed to export parents',
-      message: process.env.NODE_ENV === 'development' ? error.message : 'An error occurred while exporting. Please try again.'
+      message: process.env.NODE_ENV === 'development' ? error.message : 'An error occurred while exporting. Please try again.',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
