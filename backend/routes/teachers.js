@@ -1,8 +1,11 @@
 import express from 'express';
+import multer from 'multer';
+import xlsx from 'xlsx';
 import pool from '../database/db.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
+const upload = multer({ dest: 'uploads/' });
 
 // Get all teachers
 router.get('/', authenticateToken, async (req, res) => {
@@ -50,6 +53,129 @@ router.get('/', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Get teachers error:', error);
     res.status(500).json({ error: 'Failed to fetch teachers' });
+  }
+});
+
+// Download import template
+router.get('/import/template', authenticateToken, (req, res) => {
+  try {
+    // Create template data
+    const templateData = [
+      {
+        'Teacher Name': 'Ahmed Ali',
+        'Department': 'Quraan',
+        'Monthly Salary': 5000.00,
+        'Phone Number': '1234567890',
+        'Date of Joining': '2024-01-15'
+      },
+      {
+        'Teacher Name': 'Fatima Hassan',
+        'Department': 'Primary/Middle/Secondary',
+        'Monthly Salary': 6000.00,
+        'Phone Number': '0987654321',
+        'Date of Joining': '2024-02-01'
+      }
+    ];
+
+    // Create workbook
+    const workbook = xlsx.utils.book_new();
+    const worksheet = xlsx.utils.json_to_sheet(templateData);
+    
+    // Set column widths
+    worksheet['!cols'] = [
+      { wch: 20 }, // Teacher Name
+      { wch: 25 }, // Department
+      { wch: 15 }, // Monthly Salary
+      { wch: 15 }, // Phone Number
+      { wch: 18 }  // Date of Joining
+    ];
+
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'Teachers');
+
+    // Generate buffer
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+    // Set headers
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=teachers_import_template.xlsx');
+
+    res.send(buffer);
+  } catch (error) {
+    console.error('Download template error:', error);
+    res.status(500).json({ error: 'Failed to generate template' });
+  }
+});
+
+// Import teachers from Excel
+router.post('/import', authenticateToken, requireAdmin, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const workbook = xlsx.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = xlsx.utils.sheet_to_json(worksheet);
+
+    const imported = [];
+    const errors = [];
+
+    for (const row of data) {
+      try {
+        const teacher_name = row['Teacher Name'] || row['teacher_name'] || row['Name'] || row['name'];
+        const department = row['Department'] || row['department'];
+        const monthly_salary = parseFloat(row['Monthly Salary'] || row['monthly_salary'] || row['Salary'] || row['salary'] || 0);
+        const phone_number = row['Phone Number'] || row['phone_number'] || row['Phone'] || row['phone'] || null;
+        const date_of_joining = row['Date of Joining'] || row['date_of_joining'] || row['Date'] || row['date'];
+
+        if (!teacher_name || !department || !monthly_salary || !date_of_joining) {
+          errors.push({ row, error: 'Missing required fields (Teacher Name, Department, Monthly Salary, Date of Joining)' });
+          continue;
+        }
+
+        // Validate department
+        const validDepartments = ['Quraan', 'Primary/Middle/Secondary', 'Shareeca'];
+        if (!validDepartments.includes(department)) {
+          errors.push({ row, error: `Invalid department. Must be one of: ${validDepartments.join(', ')}` });
+          continue;
+        }
+
+        // Validate date format
+        const dateObj = new Date(date_of_joining);
+        if (isNaN(dateObj.getTime())) {
+          errors.push({ row, error: 'Invalid date format for Date of Joining. Use YYYY-MM-DD format' });
+          continue;
+        }
+
+        const result = await pool.query(
+          `INSERT INTO teachers (teacher_name, department, monthly_salary, phone_number, date_of_joining)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING *`,
+          [teacher_name, department, monthly_salary, phone_number || null, date_of_joining]
+        );
+
+        imported.push(result.rows[0]);
+      } catch (error) {
+        errors.push({ row, error: error.message });
+      }
+    }
+
+    // Emit real-time update via Socket.io
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('teacher:imported', { count: imported.length });
+      io.emit('reports:updated');
+    }
+
+    res.json({
+      imported: imported.length,
+      errors: errors.length,
+      details: { imported, errors }
+    });
+  } catch (error) {
+    console.error('Import teachers error:', error);
+    res.status(500).json({ error: 'Failed to import teachers' });
   }
 });
 

@@ -8,7 +8,9 @@ import {
   MagnifyingGlassIcon,
   PencilIcon,
   EyeIcon,
-  TrashIcon
+  TrashIcon,
+  ArrowDownTrayIcon,
+  ArrowUpTrayIcon
 } from '@heroicons/react/24/outline'
 
 const DEPARTMENTS = ['Quraan', 'Primary/Middle/Secondary', 'Shareeca']
@@ -82,6 +84,7 @@ export default function Teachers() {
       socket.off('teacher:created', handleTeacherCreated)
       socket.off('teacher:updated', handleTeacherUpdated)
       socket.off('teacher:deleted', handleTeacherDeleted)
+      socket.off('teacher:imported', handleTeacherImported)
     }
   }, [socket, fetchTeachers])
 
@@ -130,6 +133,48 @@ export default function Teachers() {
     }
   }
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const response = await api.get('/teachers/import/template', {
+        responseType: 'blob'
+      })
+      
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', 'teachers_import_template.xlsx')
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      
+      toast.success('Template downloaded successfully')
+    } catch (error) {
+      toast.error('Failed to download template')
+    }
+  }
+
+  const handleImport = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const response = await api.post('/teachers/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      toast.success(`Imported ${response.data.imported} teachers${response.data.errors > 0 ? ` (${response.data.errors} errors)` : ''}`)
+      if (response.data.errors > 0 && response.data.details?.errors?.length > 0) {
+        console.error('Import errors:', response.data.details.errors)
+      }
+      fetchTeachers()
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Failed to import teachers')
+    }
+  }
+
   return (
     <div className="w-full max-w-full space-y-4 sm:space-y-6 px-2 sm:px-0">
       <div className="flex flex-col gap-4">
@@ -137,10 +182,28 @@ export default function Teachers() {
           <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900">Teachers</h1>
           <p className="text-xs sm:text-sm text-gray-500 mt-1">Manage teacher information and salary records</p>
         </div>
-        <button onClick={() => setShowAddModal(true)} className="btn btn-primary w-full sm:w-auto text-sm">
-          <PlusIcon className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" />
-          Add Teacher
-        </button>
+        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+          <button onClick={handleDownloadTemplate} className="btn btn-outline w-full sm:w-auto text-sm">
+            <ArrowDownTrayIcon className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" />
+            <span className="hidden sm:inline">Download Template</span>
+            <span className="sm:hidden">Template</span>
+          </button>
+          <label className="btn btn-outline w-full sm:w-auto text-sm cursor-pointer">
+            <ArrowUpTrayIcon className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" />
+            <span className="hidden sm:inline">Import Teachers</span>
+            <span className="sm:hidden">Import</span>
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={handleImport}
+              className="hidden"
+            />
+          </label>
+          <button onClick={() => setShowAddModal(true)} className="btn btn-primary w-full sm:w-auto text-sm">
+            <PlusIcon className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" />
+            Add Teacher
+          </button>
+        </div>
       </div>
 
       {/* Search */}
