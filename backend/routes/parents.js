@@ -58,117 +58,6 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Get single parent
-router.get('/:id', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query('SELECT * FROM parents WHERE id = $1', [id]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Parent not found' });
-    }
-
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Get parent error:', error);
-    res.status(500).json({ error: 'Failed to fetch parent' });
-  }
-});
-
-// Create parent
-router.post('/', authenticateToken, async (req, res) => {
-  try {
-    const { parent_name, phone_number, number_of_children, monthly_fee_amount } = req.body;
-
-    if (!parent_name || !phone_number || !monthly_fee_amount) {
-      return res.status(400).json({ error: 'Parent name, phone number, and monthly fee are required' });
-    }
-
-    const result = await pool.query(
-      `INSERT INTO parents (parent_name, phone_number, number_of_children, monthly_fee_amount)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [parent_name, phone_number, number_of_children || 1, monthly_fee_amount]
-    );
-
-    // Emit real-time update via Socket.io
-    const io = req.app.get('io');
-    if (io) {
-      io.emit('parent:created', { parent: result.rows[0] });
-      io.emit('reports:updated');
-    }
-
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    if (error.code === '23505') {
-      return res.status(400).json({ error: 'Phone number already exists' });
-    }
-    console.error('Create parent error:', error);
-    res.status(500).json({ error: 'Failed to create parent' });
-  }
-});
-
-// Update parent
-router.put('/:id', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { parent_name, phone_number, number_of_children, monthly_fee_amount } = req.body;
-
-    const result = await pool.query(
-      `UPDATE parents 
-       SET parent_name = COALESCE($1, parent_name),
-           phone_number = COALESCE($2, phone_number),
-           number_of_children = COALESCE($3, number_of_children),
-           monthly_fee_amount = COALESCE($4, monthly_fee_amount)
-       WHERE id = $5 RETURNING *`,
-      [parent_name, phone_number, number_of_children, monthly_fee_amount, id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Parent not found' });
-    }
-
-    // Emit real-time update via Socket.io
-    const io = req.app.get('io');
-    if (io) {
-      io.emit('parent:updated', { parent_id: id, parent: result.rows[0] });
-      io.emit('reports:updated');
-    }
-
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Update parent error:', error);
-    res.status(500).json({ error: 'Failed to update parent' });
-  }
-});
-
-// Delete parent
-router.delete('/:id', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Check if parent exists
-    const parentResult = await pool.query('SELECT * FROM parents WHERE id = $1', [id]);
-    if (parentResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Parent not found' });
-    }
-
-    // Delete parent (cascade will handle related records)
-    await pool.query('DELETE FROM parents WHERE id = $1', [id]);
-
-    // Emit real-time update via Socket.io
-    const io = req.app.get('io');
-    if (io) {
-      io.emit('parent:deleted', { parent_id: id });
-      io.emit('reports:updated');
-    }
-
-    res.json({ message: 'Parent deleted successfully' });
-  } catch (error) {
-    console.error('Delete parent error:', error);
-    res.status(500).json({ error: 'Failed to delete parent' });
-  }
-});
-
 // Export all parents to Excel
 router.get('/export', authenticateToken, async (req, res) => {
   try {
@@ -372,6 +261,117 @@ router.post('/import', authenticateToken, upload.single('file'), async (req, res
   } catch (error) {
     console.error('Import parents error:', error);
     res.status(500).json({ error: 'Failed to import parents' });
+  }
+});
+
+// Get single parent
+router.get('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('SELECT * FROM parents WHERE id = $1', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Parent not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Get parent error:', error);
+    res.status(500).json({ error: 'Failed to fetch parent' });
+  }
+});
+
+// Create parent
+router.post('/', authenticateToken, async (req, res) => {
+  try {
+    const { parent_name, phone_number, number_of_children, monthly_fee_amount } = req.body;
+
+    if (!parent_name || !phone_number || !monthly_fee_amount) {
+      return res.status(400).json({ error: 'Parent name, phone number, and monthly fee are required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO parents (parent_name, phone_number, number_of_children, monthly_fee_amount)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [parent_name, phone_number, number_of_children || 1, monthly_fee_amount]
+    );
+
+    // Emit real-time update via Socket.io
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('parent:created', { parent: result.rows[0] });
+      io.emit('reports:updated');
+    }
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'Phone number already exists' });
+    }
+    console.error('Create parent error:', error);
+    res.status(500).json({ error: 'Failed to create parent' });
+  }
+});
+
+// Update parent
+router.put('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { parent_name, phone_number, number_of_children, monthly_fee_amount } = req.body;
+
+    const result = await pool.query(
+      `UPDATE parents 
+       SET parent_name = COALESCE($1, parent_name),
+           phone_number = COALESCE($2, phone_number),
+           number_of_children = COALESCE($3, number_of_children),
+           monthly_fee_amount = COALESCE($4, monthly_fee_amount)
+       WHERE id = $5 RETURNING *`,
+      [parent_name, phone_number, number_of_children, monthly_fee_amount, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Parent not found' });
+    }
+
+    // Emit real-time update via Socket.io
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('parent:updated', { parent_id: id, parent: result.rows[0] });
+      io.emit('reports:updated');
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Update parent error:', error);
+    res.status(500).json({ error: 'Failed to update parent' });
+  }
+});
+
+// Delete parent
+router.delete('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if parent exists
+    const parentResult = await pool.query('SELECT * FROM parents WHERE id = $1', [id]);
+    if (parentResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Parent not found' });
+    }
+
+    // Delete parent (cascade will handle related records)
+    await pool.query('DELETE FROM parents WHERE id = $1', [id]);
+
+    // Emit real-time update via Socket.io
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('parent:deleted', { parent_id: id });
+      io.emit('reports:updated');
+    }
+
+    res.json({ message: 'Parent deleted successfully' });
+  } catch (error) {
+    console.error('Delete parent error:', error);
+    res.status(500).json({ error: 'Failed to delete parent' });
   }
 });
 
