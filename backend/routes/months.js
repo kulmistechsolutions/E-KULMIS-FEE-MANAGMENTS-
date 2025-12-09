@@ -346,7 +346,7 @@ router.get('/:monthId', authenticateToken, async (req, res) => {
 });
 
 // Delete a billing month (with cascade delete of related records)
-router.delete('/:monthId', authenticateToken, async (req, res) => {
+router.delete('/:monthId', authenticateToken, requireAdmin, async (req, res) => {
   const client = await pool.connect();
   
   try {
