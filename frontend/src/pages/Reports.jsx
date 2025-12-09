@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { useSocket } from '../contexts/SocketContext'
-import { ArrowDownTrayIcon } from '@heroicons/react/24/outline'
+import { ArrowDownTrayIcon, DocumentArrowDownIcon } from '@heroicons/react/24/outline'
 
 export default function Reports() {
   const [summary, setSummary] = useState(null)
@@ -64,6 +64,28 @@ export default function Reports() {
     }
   }
 
+  const handleExportPDF = async () => {
+    try {
+      const params = selectedMonth ? { month: selectedMonth } : {}
+      const response = await api.get('/reports/export-pdf', {
+        params,
+        responseType: 'blob'
+      })
+
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `financial-report-${selectedMonth || 'active'}.pdf`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+
+      toast.success('PDF report downloaded successfully')
+    } catch (error) {
+      toast.error('Failed to export PDF')
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -89,7 +111,12 @@ export default function Reports() {
           <button onClick={handleExport} className="btn btn-primary w-full sm:w-auto text-sm sm:text-base">
             <ArrowDownTrayIcon className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" />
             <span className="hidden sm:inline">Export Excel</span>
-            <span className="sm:hidden">Export</span>
+            <span className="sm:hidden">Excel</span>
+          </button>
+          <button onClick={handleExportPDF} className="btn btn-outline w-full sm:w-auto text-sm sm:text-base">
+            <DocumentArrowDownIcon className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" />
+            <span className="hidden sm:inline">Export PDF</span>
+            <span className="sm:hidden">PDF</span>
           </button>
         </div>
       </div>

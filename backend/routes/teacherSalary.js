@@ -1,4 +1,5 @@
 import express from 'express';
+import PDFDocument from 'pdfkit';
 import pool from '../database/db.js';
 import { authenticateToken } from '../middleware/auth.js';
 
@@ -267,6 +268,147 @@ router.get('/summary', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Get salary summary error:', error);
     res.status(500).json({ error: 'Failed to fetch salary summary' });
+  }
+});
+
+// Generate salary receipt PDF
+router.get('/receipt/:paymentId', authenticateToken, async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+
+    // Get payment details with teacher and month info
+    const paymentResult = await pool.query(
+      `SELECT 
+        tsp.*,
+        t.teacher_name,
+        t.department,
+        t.phone_number,
+        t.monthly_salary,
+        bm.year,
+        bm.month,
+        u.username as paid_by_name,
+        tsr.total_due_this_month,
+        tsr.outstanding_after_payment
+      FROM teacher_salary_payments tsp
+      JOIN teachers t ON tsp.teacher_id = t.id
+      JOIN billing_months bm ON tsp.billing_month_id = bm.id
+      JOIN users u ON tsp.paid_by = u.id
+      LEFT JOIN teacher_salary_records tsr ON tsr.teacher_id = t.id AND tsr.billing_month_id = bm.id
+      WHERE tsp.id = $1`,
+      [paymentId]
+    );
+
+    if (paymentResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    const payment = paymentResult.rows[0];
+    const monthName = new Date(payment.year, payment.month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    // Create PDF
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    
+    // Set response headers
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=salary-receipt-${payment.id}.pdf`);
+
+    // Pipe PDF to response
+    doc.pipe(res);
+
+    // Header
+    doc.fontSize(20).font('Helvetica-Bold').text('Rowdatul Iimaan School', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(16).font('Helvetica').text('Salary Payment Receipt', { align: 'center' });
+    doc.moveDown(1);
+
+    // Draw line
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(1);
+
+    // Receipt details
+    doc.fontSize(12).font('Helvetica-Bold').text('Receipt Details:', 50, doc.y);
+    doc.moveDown(0.5);
+    doc.font('Helvetica').fontSize(10);
+    
+    const receiptDetails = [
+      ['Receipt Number:', `SR-${payment.id}`],
+      ['Date:', new Date(payment.payment_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })],
+      ['Time:', new Date(payment.payment_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })],
+      ['Payment Type:', payment.payment_type.charAt(0).toUpperCase() + payment.payment_type.slice(1)],
+    ];
+
+    receiptDetails.forEach(([label, value]) => {
+      doc.text(`${label}`, 50, doc.y, { continued: true, width: 200 });
+      doc.text(value, 250, doc.y, { width: 300 });
+      doc.moveDown(0.4);
+    });
+
+    doc.moveDown(1);
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(1);
+
+    // Teacher Information
+    doc.fontSize(12).font('Helvetica-Bold').text('Teacher Information:', 50, doc.y);
+    doc.moveDown(0.5);
+    doc.font('Helvetica').fontSize(10);
+
+    const teacherDetails = [
+      ['Teacher Name:', payment.teacher_name],
+      ['Department:', payment.department],
+      ['Phone:', payment.phone_number || 'N/A'],
+      ['Monthly Salary:', `$${parseFloat(payment.monthly_salary).toLocaleString()}`],
+    ];
+
+    teacherDetails.forEach(([label, value]) => {
+      doc.text(`${label}`, 50, doc.y, { continued: true, width: 200 });
+      doc.text(value, 250, doc.y, { width: 300 });
+      doc.moveDown(0.4);
+    });
+
+    doc.moveDown(1);
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(1);
+
+    // Payment Information
+    doc.fontSize(12).font('Helvetica-Bold').text('Payment Information:', 50, doc.y);
+    doc.moveDown(0.5);
+    doc.font('Helvetica').fontSize(10);
+
+    const paymentDetails = [
+      ['Month:', monthName],
+      ['Amount Paid:', `$${parseFloat(payment.amount).toLocaleString()}`],
+      ['Total Due:', `$${parseFloat(payment.total_due_this_month || payment.monthly_salary).toLocaleString()}`],
+      ['Outstanding:', `$${parseFloat(payment.outstanding_after_payment || 0).toLocaleString()}`],
+      ['Paid By:', payment.paid_by_name],
+    ];
+
+    paymentDetails.forEach(([label, value]) => {
+      doc.text(`${label}`, 50, doc.y, { continued: true, width: 200 });
+      doc.font('Helvetica-Bold').text(value, 250, doc.y, { width: 300 });
+      doc.font('Helvetica');
+      doc.moveDown(0.4);
+    });
+
+    if (payment.notes) {
+      doc.moveDown(0.5);
+      doc.text('Notes:', 50, doc.y);
+      doc.text(payment.notes, 50, doc.y + 15, { width: 495 });
+    }
+
+    doc.moveDown(2);
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(1);
+
+    // Footer
+    doc.fontSize(10).font('Helvetica').text('Thank you for your service!', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(8).text('This is a computer-generated receipt.', { align: 'center' });
+
+    // Finalize PDF
+    doc.end();
+  } catch (error) {
+    console.error('Generate salary receipt PDF error:', error);
+    res.status(500).json({ error: 'Failed to generate receipt PDF' });
   }
 });
 
