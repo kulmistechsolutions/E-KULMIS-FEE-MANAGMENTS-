@@ -18,7 +18,7 @@ export default function Users() {
   })
 
   useEffect(() => {
-    if (currentUser?.role === 'admin') {
+    if (currentUser?.role === 'admin' || currentUser?.role === 'school_admin') {
       fetchUsers()
     }
   }, [currentUser])
@@ -79,7 +79,7 @@ export default function Users() {
   const rolePermissions = {
     admin: [
       'Dashboard',
-      'Parents',
+      'Students',
       'Collect Fee',
       'Teachers',
       'Pay Teacher Salary',
@@ -90,16 +90,27 @@ export default function Users() {
     ],
     cashier: [
       'Dashboard',
-      'Parents',
+      'Students',
       'Collect Fee',
       'Reports'
+    ],
+    school_admin: [
+      'Dashboard',
+      'Students',
+      'Collect Fee',
+      'Teachers',
+      'Pay Teacher Salary',
+      'Expenses',
+      'Month Setup',
+      'Reports',
+      'Users'
     ]
   }
 
-  if (currentUser?.role !== 'admin') {
+  if (currentUser?.role !== 'admin' && currentUser?.role !== 'school_admin') {
     return (
       <div className="card">
-        <p className="text-red-600">Access denied. Admin privileges required.</p>
+        <p className="text-red-600">Access denied. School Admin privileges required.</p>
       </div>
     )
   }
@@ -194,7 +205,7 @@ export default function Users() {
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                <label className="form-label mb-1">Username</label>
                 <input
                   type="text"
                   required
@@ -204,7 +215,7 @@ export default function Users() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <label className="form-label mb-1">Email</label>
                 <input
                   type="email"
                   required
@@ -214,7 +225,7 @@ export default function Users() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="form-label mb-1">
                   Password {editingUser && '(leave blank to keep current)'}
                 </label>
                 <input
@@ -226,7 +237,7 @@ export default function Users() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                <label className="form-label mb-1">Role</label>
                 <select
                   value={formData.role}
                   onChange={(e) => setFormData({ ...formData, role: e.target.value })}

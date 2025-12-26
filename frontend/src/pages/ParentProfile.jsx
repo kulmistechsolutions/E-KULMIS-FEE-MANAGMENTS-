@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { useSocket } from '../contexts/SocketContext'
+import { useAuth } from '../contexts/AuthContext'
 import {
   ArrowLeftIcon,
   ChevronDownIcon,
@@ -21,6 +22,7 @@ export default function ParentProfile() {
   const [expandedMonths, setExpandedMonths] = useState(new Set())
   const [filter, setFilter] = useState('all') // all, unpaid, partial, paid, overdue
   const { socket } = useSocket()
+  const { branding } = useAuth()
 
   useEffect(() => {
     fetchProfile()
@@ -55,8 +57,8 @@ export default function ParentProfile() {
   const fetchProfile = async () => {
     try {
       setLoading(true)
-      const response = await api.get(`/parents/${id}/profile`)
-      setParent(response.data.parent)
+      const response = await api.get(`/students/${id}/profile`)
+      setParent(response.data.student || response.data.parent)
       setTimeline(response.data.timeline)
     } catch (error) {
       toast.error('Failed to fetch parent profile')
@@ -137,7 +139,7 @@ export default function ParentProfile() {
     const link = document.createElement('a')
     const url = URL.createObjectURL(blob)
     link.setAttribute('href', url)
-    link.setAttribute('download', `${parent?.parent_name}_Fee_Timeline.csv`)
+    link.setAttribute('download', `${parent?.student_name || parent?.parent_name || 'student'}_Fee_Timeline.csv`)
     link.style.visibility = 'hidden'
     document.body.appendChild(link)
     link.click()
@@ -150,15 +152,15 @@ export default function ParentProfile() {
     
     // School Header
     doc.setFontSize(20)
-    doc.text('Rowdatul Iimaan School', 105, 20, { align: 'center' })
+    doc.text(branding?.school?.name || 'FEE-KULMIS', 105, 20, { align: 'center' })
     doc.setFontSize(14)
-    doc.text('Parent Fee Timeline Report', 105, 30, { align: 'center' })
+    doc.text('Student Fee Timeline Report', 105, 30, { align: 'center' })
     
     // Parent Info
     doc.setFontSize(12)
-    doc.text(`Parent: ${parent?.parent_name}`, 20, 45)
-    doc.text(`Phone: ${parent?.phone_number}`, 20, 52)
-    doc.text(`Children: ${parent?.number_of_children}`, 20, 59)
+    doc.text(`Student: ${parent?.student_name || parent?.parent_name}`, 20, 45)
+    doc.text(`Guardian: ${parent?.guardian_name || parent?.parent_name}`, 20, 52)
+    doc.text(`Phone: ${parent?.guardian_phone_number || parent?.phone_number}`, 20, 59)
     doc.text(`Monthly Fee: $${parseFloat(parent?.monthly_fee_amount || 0).toLocaleString()}`, 20, 66)
     
     // Timeline Table
@@ -202,7 +204,7 @@ export default function ParentProfile() {
       yPos += rowHeight
     })
     
-    doc.save(`${parent?.parent_name}_Fee_Timeline.pdf`)
+    doc.save(`${parent?.student_name || parent?.parent_name || 'student'}_Fee_Timeline.pdf`)
     toast.success('Timeline exported to PDF')
   }
 
@@ -213,7 +215,7 @@ export default function ParentProfile() {
     
     // Try to add logo
     try {
-      const logoUrl = '/logo.jpeg'
+      const logoUrl = branding?.school?.logo_path || '/systemlogo.png'
       const img = new Image()
       img.crossOrigin = 'anonymous'
       img.src = logoUrl
@@ -243,7 +245,7 @@ export default function ParentProfile() {
     doc.setFontSize(16)
     doc.setFont(undefined, 'bold')
     doc.setTextColor(30, 58, 138) // Blue color
-    doc.text('Rowdatul Iimaan School', pageWidth / 2, yPos, { align: 'center' })
+    doc.text(branding?.school?.name || 'FEE-KULMIS', pageWidth / 2, yPos, { align: 'center' })
     
     yPos += 7
     doc.setFontSize(12)
@@ -265,9 +267,9 @@ export default function ParentProfile() {
     doc.setTextColor(0, 0, 0)
     
     const parentInfo = [
-      `Parent: ${String(parent?.parent_name || 'N/A')}`,
-      `Phone: ${String(parent?.phone_number || 'N/A')}`,
-      `Children: ${String(parent?.number_of_children || 'N/A')}`
+      `Student: ${String(parent?.student_name || parent?.parent_name || 'N/A')}`,
+      `Guardian: ${String(parent?.guardian_name || parent?.parent_name || 'N/A')}`,
+      `Phone: ${String(parent?.guardian_phone_number || parent?.phone_number || 'N/A')}`
     ]
     
     parentInfo.forEach((info, idx) => {
@@ -432,13 +434,13 @@ export default function ParentProfile() {
       {/* Header */}
       <div className="flex flex-col gap-4">
         <div className="flex items-center space-x-2 sm:space-x-4">
-          <button onClick={() => navigate('/parents')} className="btn btn-outline flex-shrink-0">
+          <button onClick={() => navigate('/students')} className="btn btn-outline flex-shrink-0">
             <ArrowLeftIcon className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" />
             <span className="hidden sm:inline">Back</span>
           </button>
           <div className="min-w-0 flex-1">
             <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 truncate">
-              {parent?.parent_name}
+              {parent?.student_name || parent?.parent_name}
             </h1>
             <p className="text-xs sm:text-sm text-gray-500 mt-1">Monthly Fee Timeline</p>
           </div>

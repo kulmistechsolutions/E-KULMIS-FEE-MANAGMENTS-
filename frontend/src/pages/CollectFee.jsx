@@ -14,7 +14,7 @@ export default function CollectFee() {
   const [selectedMonth, setSelectedMonth] = useState(null)
   const [selectedMonthId, setSelectedMonthId] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedParent, setSelectedParent] = useState(null)
+  const [selectedStudent, setSelectedStudent] = useState(null)
   const [parentFee, setParentFee] = useState(null)
   const [allFees, setAllFees] = useState([])
   const [statusFilter, setStatusFilter] = useState('all')
@@ -160,8 +160,8 @@ export default function CollectFee() {
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase()
       filtered = filtered.filter(fee => 
-        fee.parent_name?.toLowerCase().includes(query) ||
-        fee.phone_number?.includes(searchQuery)
+        fee.student_name?.toLowerCase().includes(query) ||
+        fee.guardian_phone_number?.includes(searchQuery)
       )
     }
 
@@ -174,18 +174,19 @@ export default function CollectFee() {
   }, [allFees, searchQuery, statusFilter])
 
   const handleSelectParent = (fee) => {
-    setSelectedParent({
+    setSelectedStudent({
       id: fee.parent_id,
-      parent_name: fee.parent_name,
-      phone_number: fee.phone_number,
-      number_of_children: fee.number_of_children,
-      monthly_fee_amount: fee.parent_monthly_fee
+      student_name: fee.student_name,
+      guardian_name: fee.guardian_name,
+      guardian_phone_number: fee.guardian_phone_number,
+      class_section: fee.class_section,
+      monthly_fee_amount: fee.monthly_fee_amount
     })
     setParentFee(fee)
     setSearchQuery('')
     // Auto-select advance payment if month is already paid
     if (fee.status === 'paid') {
-      const monthlyFee = parseFloat(fee.parent_monthly_fee || 0)
+      const monthlyFee = parseFloat(fee.monthly_fee_amount || 0)
       const calculatedAmount = (monthlyFee * 1).toFixed(2)
       setPaymentData({ amount: calculatedAmount, payment_type: 'advance', months_advance: 1, notes: '' })
     } else {
@@ -194,15 +195,15 @@ export default function CollectFee() {
   }
 
   const clearSelection = () => {
-    setSelectedParent(null)
+    setSelectedStudent(null)
     setParentFee(null)
     setPaymentData({ amount: '', payment_type: 'normal', months_advance: 1, notes: '' })
   }
 
   const handlePayment = async (e) => {
     e.preventDefault()
-    if (!selectedParent || !selectedMonthId) {
-      toast.error('Please select a parent and month')
+    if (!selectedStudent || !selectedMonthId) {
+      toast.error('Please select a student and month')
       return
     }
 
@@ -246,7 +247,7 @@ export default function CollectFee() {
     try {
       setLoading(true)
       const response = await api.post('/payments', {
-        parent_id: selectedParent.id,
+        student_id: selectedStudent.id,
         billing_month_id: selectedMonthId,
         amount: paymentAmount,
         payment_type: paymentData.payment_type,
@@ -279,12 +280,12 @@ export default function CollectFee() {
     <div className="w-full max-w-full space-y-4 sm:space-y-6 px-2 sm:px-0">
       <div>
         <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900">Collect Monthly Fee</h1>
-        <p className="text-xs sm:text-sm text-gray-500 mt-1">Process fee payments from parents</p>
+        <p className="text-xs sm:text-sm text-gray-500 mt-1">Process fee payments for students</p>
       </div>
 
       {/* Month Selector */}
       <div className="card p-4 sm:p-6">
-        <label className="block text-sm font-medium text-gray-700 mb-2">Select Month</label>
+        <label className="form-label">Select Month</label>
         <select
           value={selectedMonthId || ''}
           onChange={(e) => {
@@ -361,9 +362,9 @@ export default function CollectFee() {
           <div className="p-4 sm:p-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-semibold text-gray-900">
-                Parents ({filteredFees.length})
+                Students ({filteredFees.length})
               </h2>
-              {selectedParent && (
+              {selectedStudent && (
                 <button
                   onClick={clearSelection}
                   className="text-sm text-gray-600 hover:text-gray-900 flex items-center"
@@ -405,18 +406,18 @@ export default function CollectFee() {
                     <tr 
                       key={fee.id} 
                       className={`hover:bg-gray-50 cursor-pointer transition-colors ${
-                        selectedParent?.id === fee.parent_id ? 'bg-primary-50' : ''
+                        selectedStudent?.id === fee.parent_id ? 'bg-primary-50' : ''
                       }`}
                       onClick={() => handleSelectParent(fee)}
                     >
                       <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {fee.parent_name}
+                        {fee.student_name}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                        {fee.phone_number}
+                        {fee.guardian_phone_number}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                        ${parseFloat(fee.monthly_fee).toLocaleString()}
+                        ${parseFloat(fee.monthly_fee_amount).toLocaleString()}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
                         ${parseFloat(fee.total_due_this_month).toLocaleString()}
@@ -457,9 +458,9 @@ export default function CollectFee() {
         <div className="lg:hidden space-y-3">
           <div className="flex justify-between items-center px-2">
             <h2 className="text-base sm:text-lg font-semibold text-gray-900">
-              Parents ({filteredFees.length})
+              Students ({filteredFees.length})
             </h2>
-            {selectedParent && (
+            {selectedStudent && (
               <button
                 onClick={clearSelection}
                 className="text-xs sm:text-sm text-gray-600 hover:text-gray-900 flex items-center"
@@ -486,7 +487,7 @@ export default function CollectFee() {
                 key={fee.id}
                 onClick={() => handleSelectParent(fee)}
                 className={`card p-4 cursor-pointer transition-all ${
-                  selectedParent?.id === fee.parent_id 
+                  selectedStudent?.id === fee.parent_id 
                     ? 'bg-primary-50 border-2 border-primary-300 shadow-lg' 
                     : 'hover:shadow-md'
                 }`}
@@ -494,9 +495,9 @@ export default function CollectFee() {
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1 min-w-0">
                     <h3 className="text-base font-bold text-gray-900 truncate mb-1">
-                      {fee.parent_name}
+                      {fee.student_name}
                     </h3>
-                    <p className="text-sm text-gray-600 break-all">{fee.phone_number}</p>
+                    <p className="text-sm text-gray-600 break-all">{fee.guardian_phone_number}</p>
                   </div>
                   <span className={`px-2 py-1 text-xs font-semibold rounded-full flex-shrink-0 ml-2 ${getStatusBadge(fee.status)}`}>
                     {fee.status}
@@ -506,7 +507,7 @@ export default function CollectFee() {
                 <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
                   <div>
                     <p className="text-xs text-gray-600">Monthly Fee</p>
-                    <p className="font-semibold">${parseFloat(fee.monthly_fee).toLocaleString()}</p>
+                    <p className="font-semibold">${parseFloat(fee.monthly_fee_amount).toLocaleString()}</p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-600">Total Due</p>
@@ -538,7 +539,7 @@ export default function CollectFee() {
       )}
 
       {/* Parent Info & Payment Form - Modal Popup */}
-      {selectedParent && parentFee && (
+      {selectedStudent && parentFee && (
         <div 
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto"
           onClick={clearSelection}
@@ -562,23 +563,23 @@ export default function CollectFee() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
                 {/* Parent Information */}
                 <div className="card p-4 sm:p-6">
-                  <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-4">Parent Information</h3>
+                  <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-4">Student Information</h3>
                   <div className="space-y-3">
                     <div>
-                      <p className="text-xs sm:text-sm text-gray-600">Parent Name</p>
-                      <p className="text-base sm:text-lg font-semibold break-words">{selectedParent.parent_name}</p>
+                      <p className="text-xs sm:text-sm text-gray-600">Student Name</p>
+                      <p className="text-base sm:text-lg font-semibold break-words">{selectedStudent.student_name}</p>
                     </div>
                     <div>
-                      <p className="text-xs sm:text-sm text-gray-600">Phone Number</p>
-                      <p className="text-base sm:text-lg font-semibold break-all">{selectedParent.phone_number}</p>
+                      <p className="text-xs sm:text-sm text-gray-600">Guardian Name</p>
+                      <p className="text-base sm:text-lg font-semibold break-words">{selectedStudent.guardian_name}</p>
                     </div>
                     <div>
-                      <p className="text-xs sm:text-sm text-gray-600">Number of Children</p>
-                      <p className="text-base sm:text-lg font-semibold">{selectedParent.number_of_children}</p>
+                      <p className="text-xs sm:text-sm text-gray-600">Guardian Phone</p>
+                      <p className="text-base sm:text-lg font-semibold break-all">{selectedStudent.guardian_phone_number}</p>
                     </div>
                     <div>
                       <p className="text-xs sm:text-sm text-gray-600">Monthly Fee</p>
-                      <p className="text-base sm:text-lg font-semibold">${parseFloat(selectedParent.monthly_fee_amount).toLocaleString()}</p>
+                      <p className="text-base sm:text-lg font-semibold">${parseFloat(selectedStudent.monthly_fee_amount).toLocaleString()}</p>
                     </div>
                     <div>
                       <p className="text-xs sm:text-sm text-gray-600">Carried Forward</p>
@@ -611,15 +612,15 @@ export default function CollectFee() {
                   <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-4">Payment Details</h3>
                   <form onSubmit={handlePayment} className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Payment Type</label>
+                      <label className="form-label">Payment Type</label>
                       <select
                         value={paymentData.payment_type}
                         onChange={(e) => {
                           const newType = e.target.value
                           let newAmount = ''
                           // Auto-calculate amount for advance payments
-                          if (newType === 'advance' && selectedParent) {
-                            const monthlyFee = parseFloat(selectedParent.monthly_fee_amount || 0)
+                          if (newType === 'advance' && selectedStudent) {
+                            const monthlyFee = parseFloat(selectedStudent.monthly_fee_amount || 0)
                             const months = parseInt(paymentData.months_advance || 1)
                             newAmount = (monthlyFee * months).toFixed(2)
                           }
@@ -642,14 +643,14 @@ export default function CollectFee() {
 
                     {paymentData.payment_type === 'advance' && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Months in Advance</label>
+                        <label className="form-label">Months in Advance</label>
                         <input
                           type="number"
                           min="1"
                           value={paymentData.months_advance}
                           onChange={(e) => {
                             const months = parseInt(e.target.value) || 1
-                            const monthlyFee = parseFloat(selectedParent?.monthly_fee_amount || 0)
+                            const monthlyFee = parseFloat(selectedStudent?.monthly_fee_amount || 0)
                             const calculatedAmount = (monthlyFee * months).toFixed(2)
                             setPaymentData({ 
                               ...paymentData, 
@@ -659,16 +660,16 @@ export default function CollectFee() {
                           }}
                           className="input text-sm sm:text-base"
                         />
-                        {selectedParent && (
+                        {selectedStudent && (
                           <p className="text-xs text-gray-500 mt-1">
-                            Monthly Fee: ${parseFloat(selectedParent.monthly_fee_amount).toFixed(2)} × {paymentData.months_advance} month(s) = ${(parseFloat(selectedParent.monthly_fee_amount) * parseInt(paymentData.months_advance || 1)).toFixed(2)}
+                            Monthly Fee: ${parseFloat(selectedStudent.monthly_fee_amount).toFixed(2)} × {paymentData.months_advance} month(s) = ${(parseFloat(selectedStudent.monthly_fee_amount) * parseInt(paymentData.months_advance || 1)).toFixed(2)}
                           </p>
                         )}
                       </div>
                     )}
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Amount</label>
+                      <label className="form-label">Amount</label>
                       <div className="relative">
                         <CurrencyDollarIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
                         <input
@@ -721,7 +722,7 @@ export default function CollectFee() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Notes (Optional)</label>
+                      <label className="form-label">Notes (Optional)</label>
                       <textarea
                         value={paymentData.notes}
                         onChange={(e) => setPaymentData({ ...paymentData, notes: e.target.value })}

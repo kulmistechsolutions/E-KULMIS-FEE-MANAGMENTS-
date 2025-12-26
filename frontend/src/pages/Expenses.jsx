@@ -300,7 +300,7 @@ export default function Expenses() {
       <div className="card">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Month</label>
+            <label className="form-label">Month</label>
             <select
               className="input"
               value={filters.month}
@@ -315,7 +315,7 @@ export default function Expenses() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+            <label className="form-label">Category</label>
             <select
               className="input"
               value={filters.category_id}
@@ -404,7 +404,7 @@ export default function Expenses() {
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+                <label className="form-label mb-1">Category *</label>
                 <select
                   required
                   className="input"
@@ -418,7 +418,7 @@ export default function Expenses() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
+                <label className="form-label mb-1">Amount *</label>
                 <input
                   type="number"
                   step="0.01"
@@ -429,7 +429,7 @@ export default function Expenses() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
+                <label className="form-label mb-1">Date *</label>
                 <input
                   type="date"
                   required
@@ -439,7 +439,7 @@ export default function Expenses() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Month (Optional)</label>
+                <label className="form-label mb-1">Month (Optional)</label>
                 <select
                   className="input"
                   value={formData.billing_month_id}
@@ -454,7 +454,7 @@ export default function Expenses() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                <label className="form-label mb-1">Notes</label>
                 <textarea
                   className="input"
                   rows="3"
@@ -504,7 +504,7 @@ export default function Expenses() {
             </div>
             <form onSubmit={handleCategorySubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Category Name *</label>
+                <label className="form-label mb-1">Category Name *</label>
                 <input
                   type="text"
                   required
@@ -515,7 +515,7 @@ export default function Expenses() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description (Optional)</label>
+                <label className="form-label mb-1">Description (Optional)</label>
                 <textarea
                   className="input text-sm sm:text-base"
                   rows="3"

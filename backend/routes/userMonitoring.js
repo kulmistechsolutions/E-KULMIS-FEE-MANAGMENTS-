@@ -1,14 +1,15 @@
 import express from 'express';
 import xlsx from 'xlsx';
 import pool from '../database/db.js';
-import { authenticateToken, requireAdmin } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin, requireSchoolContext } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // Get daily income per user (admin only)
-router.get('/daily-income', authenticateToken, requireAdmin, async (req, res) => {
+router.get('/daily-income', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { date, user_id } = req.query;
+    const schoolId = req.user.school_id;
 
     if (!date) {
       return res.status(400).json({ error: 'Date is required (format: YYYY-MM-DD)' });
@@ -23,10 +24,10 @@ router.get('/daily-income', authenticateToken, requireAdmin, async (req, res) =>
       FROM users u
       LEFT JOIN payments p ON p.collected_by = u.id
         AND DATE(p.payment_date) = $1
-      WHERE u.is_active = true
+      WHERE u.is_active = true AND u.school_id = $2
     `;
 
-    const params = [date];
+    const params = [date, schoolId];
     if (user_id) {
       query += ` AND u.id = $${params.length + 1}`;
       params.push(parseInt(user_id));
@@ -55,9 +56,10 @@ router.get('/daily-income', authenticateToken, requireAdmin, async (req, res) =>
 });
 
 // Get all transactions by user and date (admin only)
-router.get('/transactions', authenticateToken, requireAdmin, async (req, res) => {
+router.get('/transactions', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { date, user_id, start_date, end_date } = req.query;
+    const schoolId = req.user.school_id;
 
     let query = `
       SELECT 
@@ -71,10 +73,10 @@ router.get('/transactions', authenticateToken, requireAdmin, async (req, res) =>
       JOIN parents pr ON p.parent_id = pr.id
       JOIN billing_months bm ON p.billing_month_id = bm.id
       JOIN users u ON p.collected_by = u.id
-      WHERE 1=1
+      WHERE p.school_id = $1 AND pr.school_id = $1 AND bm.school_id = $1 AND u.school_id = $1
     `;
 
-    const params = [];
+    const params = [schoolId];
 
     if (date) {
       query += ` AND DATE(p.payment_date) = $${params.length + 1}`;
@@ -105,9 +107,10 @@ router.get('/transactions', authenticateToken, requireAdmin, async (req, res) =>
 });
 
 // Export daily income report as Excel (admin only)
-router.get('/daily-income/export', authenticateToken, requireAdmin, async (req, res) => {
+router.get('/daily-income/export', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { date, user_id } = req.query;
+    const schoolId = req.user.school_id;
 
     if (!date) {
       return res.status(400).json({ error: 'Date is required (format: YYYY-MM-DD)' });
@@ -122,10 +125,10 @@ router.get('/daily-income/export', authenticateToken, requireAdmin, async (req, 
       FROM users u
       LEFT JOIN payments p ON p.collected_by = u.id
         AND DATE(p.payment_date) = $1
-      WHERE u.is_active = true
+      WHERE u.is_active = true AND u.school_id = $2
     `;
 
-    const params = [date];
+    const params = [date, schoolId];
     if (user_id) {
       query += ` AND u.id = $${params.length + 1}`;
       params.push(parseInt(user_id));
@@ -197,9 +200,10 @@ router.get('/daily-income/export', authenticateToken, requireAdmin, async (req, 
 });
 
 // Export user complete report (income + transactions) as Excel (admin only)
-router.get('/user-complete-export', authenticateToken, requireAdmin, async (req, res) => {
+router.get('/user-complete-export', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { date, user_id } = req.query;
+    const schoolId = req.user.school_id;
 
     if (!date) {
       return res.status(400).json({ error: 'Date is required (format: YYYY-MM-DD)' });
@@ -210,7 +214,7 @@ router.get('/user-complete-export', authenticateToken, requireAdmin, async (req,
     }
 
     // Get user info
-    const userResult = await pool.query('SELECT id, username, email, role FROM users WHERE id = $1', [parseInt(user_id)]);
+    const userResult = await pool.query('SELECT id, username, email, role FROM users WHERE id = $1 AND school_id = $2', [parseInt(user_id), schoolId]);
     if (userResult.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -222,10 +226,11 @@ router.get('/user-complete-export', authenticateToken, requireAdmin, async (req,
         COUNT(DISTINCT p.id) as transaction_count,
         COALESCE(SUM(p.amount), 0) as total_collected
       FROM payments p
-      WHERE p.collected_by = $1
+      WHERE p.school_id = $3
+        AND p.collected_by = $1
         AND DATE(p.payment_date) = $2
     `;
-    const incomeResult = await pool.query(incomeQuery, [parseInt(user_id), date]);
+    const incomeResult = await pool.query(incomeQuery, [parseInt(user_id), date, schoolId]);
     const incomeData = incomeResult.rows[0] || { transaction_count: 0, total_collected: 0 };
 
     // Get all transactions for this user on this date with complete details
@@ -255,11 +260,12 @@ router.get('/user-complete-export', authenticateToken, requireAdmin, async (req,
       JOIN billing_months bm ON p.billing_month_id = bm.id
       JOIN users u ON p.collected_by = u.id
       LEFT JOIN parent_month_fee pmf ON pmf.parent_id = pr.id AND pmf.billing_month_id = bm.id
-      WHERE p.collected_by = $1
+      WHERE p.school_id = $3 AND pr.school_id = $3 AND bm.school_id = $3 AND u.school_id = $3 AND pmf.school_id = $3
+        AND p.collected_by = $1
         AND DATE(p.payment_date) = $2
       ORDER BY p.payment_date DESC, p.id DESC
     `;
-    const transactionsResult = await pool.query(transactionsQuery, [parseInt(user_id), date]);
+    const transactionsResult = await pool.query(transactionsQuery, [parseInt(user_id), date, schoolId]);
 
     // Create workbook
     const workbook = xlsx.utils.book_new();
@@ -360,9 +366,10 @@ router.get('/user-complete-export', authenticateToken, requireAdmin, async (req,
 });
 
 // Export transactions as Excel (admin only)
-router.get('/transactions/export', authenticateToken, requireAdmin, async (req, res) => {
+router.get('/transactions/export', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { date, user_id, start_date, end_date } = req.query;
+    const schoolId = req.user.school_id;
 
     let query = `
       SELECT 
@@ -380,10 +387,10 @@ router.get('/transactions/export', authenticateToken, requireAdmin, async (req, 
       JOIN parents pr ON p.parent_id = pr.id
       JOIN billing_months bm ON p.billing_month_id = bm.id
       JOIN users u ON p.collected_by = u.id
-      WHERE 1=1
+      WHERE p.school_id = $1 AND pr.school_id = $1 AND bm.school_id = $1 AND u.school_id = $1
     `;
 
-    const params = [];
+    const params = [schoolId];
 
     if (date) {
       query += ` AND DATE(p.payment_date) = $${params.length + 1}`;

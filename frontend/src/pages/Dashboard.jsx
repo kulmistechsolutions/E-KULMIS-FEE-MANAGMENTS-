@@ -153,14 +153,14 @@ export default function Dashboard() {
 
       {/* Parent Fees KPI Cards */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-3">Parent Fees Summary</h2>
+        <h2 className="dash-section-title">Parent Fees Summary</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 w-full">
           {kpiCards.map((card, index) => (
             <div key={index} className="card hover:shadow-md transition-shadow">
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-600 truncate">{card.title}</p>
-                  <p className={`text-xl sm:text-2xl font-bold ${card.color} mt-2 truncate`}>{card.value}</p>
+                  <p className="kpi-label truncate">{card.title}</p>
+                  <p className={`kpi-value ${card.color}`}>{card.value}</p>
                 </div>
                 <div className={`${card.bgColor} p-3 rounded-lg flex-shrink-0 ml-3`}>
                   <card.icon className={`h-6 w-6 sm:h-8 sm:w-8 ${card.color}`} />
@@ -174,14 +174,14 @@ export default function Dashboard() {
       {/* Teacher Salary KPI Cards */}
       {teacherSalarySummary && (
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">Teacher Salary Summary</h2>
+          <h2 className="dash-section-title">Teacher Salary Summary</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 w-full">
             {teacherSalaryCards.map((card, index) => (
               <div key={index} className="card hover:shadow-md transition-shadow">
                 <div className="flex items-center justify-between">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-600 truncate">{card.title}</p>
-                    <p className={`text-xl sm:text-2xl font-bold ${card.color} mt-2 truncate`}>{card.value}</p>
+                    <p className="kpi-label truncate">{card.title}</p>
+                    <p className={`kpi-value ${card.color}`}>{card.value}</p>
                   </div>
                   <div className={`${card.bgColor} p-3 rounded-lg flex-shrink-0 ml-3`}>
                     <card.icon className={`h-6 w-6 sm:h-8 sm:w-8 ${card.color}`} />
@@ -196,14 +196,14 @@ export default function Dashboard() {
       {/* Expenses KPI Cards */}
       {expensesSummary && (
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">Expenses Summary</h2>
+          <h2 className="dash-section-title">Expenses Summary</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 w-full">
             {expensesCards.map((card, index) => (
               <div key={index} className="card hover:shadow-md transition-shadow">
                 <div className="flex items-center justify-between">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-600 truncate">{card.title}</p>
-                    <p className={`text-xl sm:text-2xl font-bold ${card.color} mt-2 truncate`}>{card.value}</p>
+                    <p className="kpi-label truncate">{card.title}</p>
+                    <p className={`kpi-value ${card.color}`}>{card.value}</p>
                   </div>
                   <div className={`${card.bgColor} p-3 rounded-lg flex-shrink-0 ml-3`}>
                     <card.icon className={`h-6 w-6 sm:h-8 sm:w-8 ${card.color}`} />

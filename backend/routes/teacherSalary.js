@@ -1,15 +1,16 @@
 import express from 'express';
 import PDFDocument from 'pdfkit';
 import pool from '../database/db.js';
-import { authenticateToken, requireAdmin } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin, requireSchoolContext } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // Get salary records for a specific month
-router.get('/month/:monthId', authenticateToken, async (req, res) => {
+router.get('/month/:monthId', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { monthId } = req.params;
     const { status, search } = req.query;
+    const schoolId = req.user.school_id;
 
     let query = `
       SELECT 
@@ -20,10 +21,10 @@ router.get('/month/:monthId', authenticateToken, async (req, res) => {
         t.monthly_salary as teacher_monthly_salary
       FROM teacher_salary_records tsr
       JOIN teachers t ON tsr.teacher_id = t.id
-      WHERE tsr.billing_month_id = $1
+      WHERE tsr.billing_month_id = $1 AND tsr.school_id = $2 AND t.school_id = $2
     `;
 
-    const params = [monthId];
+    const params = [monthId, schoolId];
 
     if (status && status !== 'all') {
       query += ` AND tsr.status = $${params.length + 1}`;
@@ -46,7 +47,7 @@ router.get('/month/:monthId', authenticateToken, async (req, res) => {
 });
 
 // Pay teacher salary
-router.post('/pay', authenticateToken, requireAdmin, async (req, res) => {
+router.post('/pay', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   const client = await pool.connect();
 
   try {
@@ -54,6 +55,7 @@ router.post('/pay', authenticateToken, requireAdmin, async (req, res) => {
 
     const { teacher_id, billing_month_id, amount, payment_type, months_advance, notes } = req.body;
     const paid_by = req.user.id;
+    const schoolId = req.user.school_id;
 
     if (!teacher_id || !billing_month_id || !amount || amount <= 0) {
       await client.query('ROLLBACK');
@@ -67,14 +69,14 @@ router.post('/pay', authenticateToken, requireAdmin, async (req, res) => {
     }
 
     // Get teacher and month info
-    const teacherResult = await client.query('SELECT * FROM teachers WHERE id = $1', [teacher_id]);
+    const teacherResult = await client.query('SELECT * FROM teachers WHERE id = $1 AND school_id = $2', [teacher_id, schoolId]);
     if (teacherResult.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Teacher not found' });
     }
 
     const teacher = teacherResult.rows[0];
-    const monthResult = await client.query('SELECT * FROM billing_months WHERE id = $1', [billing_month_id]);
+    const monthResult = await client.query('SELECT * FROM billing_months WHERE id = $1 AND school_id = $2', [billing_month_id, schoolId]);
     if (monthResult.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Month not found' });
@@ -86,8 +88,8 @@ router.post('/pay', authenticateToken, requireAdmin, async (req, res) => {
 
     if (payment_type !== 'advance') {
       salaryResult = await client.query(
-        'SELECT * FROM teacher_salary_records WHERE teacher_id = $1 AND billing_month_id = $2',
-        [teacher_id, billing_month_id]
+        'SELECT * FROM teacher_salary_records WHERE teacher_id = $1 AND billing_month_id = $2 AND school_id = $3',
+        [teacher_id, billing_month_id, schoolId]
       );
 
       if (salaryResult.rows.length === 0) {
@@ -107,16 +109,16 @@ router.post('/pay', authenticateToken, requireAdmin, async (req, res) => {
     } else {
       // For advance payments, get or create salary record for current month if needed
       salaryResult = await client.query(
-        'SELECT * FROM teacher_salary_records WHERE teacher_id = $1 AND billing_month_id = $2',
-        [teacher_id, billing_month_id]
+        'SELECT * FROM teacher_salary_records WHERE teacher_id = $1 AND billing_month_id = $2 AND school_id = $3',
+        [teacher_id, billing_month_id, schoolId]
       );
 
       if (salaryResult.rows.length === 0) {
         // Create a salary record for advance payment tracking
         const insertResult = await client.query(
-          `INSERT INTO teacher_salary_records (teacher_id, billing_month_id, monthly_salary, total_due_this_month, amount_paid_this_month, outstanding_after_payment, status)
-           VALUES ($1, $2, $3, $3, 0, $3, 'unpaid') RETURNING *`,
-          [teacher_id, billing_month_id, teacher.monthly_salary]
+          `INSERT INTO teacher_salary_records (school_id, teacher_id, billing_month_id, monthly_salary, total_due_this_month, amount_paid_this_month, outstanding_after_payment, status)
+           VALUES ($1, $2, $3, $4, $4, 0, $4, 'unpaid') RETURNING *`,
+          [schoolId, teacher_id, billing_month_id, teacher.monthly_salary]
         );
         salaryRecord = insertResult.rows[0];
       } else {
@@ -162,9 +164,9 @@ router.post('/pay', authenticateToken, requireAdmin, async (req, res) => {
 
     // Create payment record
     const paymentResult = await client.query(
-      `INSERT INTO teacher_salary_payments (teacher_id, billing_month_id, amount, payment_type, paid_by, notes)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [teacher_id, billing_month_id, amount, paymentType, paid_by, notes || null]
+      `INSERT INTO teacher_salary_payments (school_id, teacher_id, billing_month_id, amount, payment_type, paid_by, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [schoolId, teacher_id, billing_month_id, amount, paymentType, paid_by, notes || null]
     );
 
     const payment = paymentResult.rows[0];
@@ -172,9 +174,9 @@ router.post('/pay', authenticateToken, requireAdmin, async (req, res) => {
     // Create advance payment record if needed
     if (payment_type === 'advance' && months_advance) {
       await client.query(
-        `INSERT INTO teacher_advance_payments (teacher_id, payment_id, months_paid, months_remaining, amount_per_month)
-         VALUES ($1, $2, $3, $3, $4)`,
-        [teacher_id, payment.id, months_advance, parseFloat(amount) / months_advance]
+        `INSERT INTO teacher_advance_payments (school_id, teacher_id, payment_id, months_paid, months_remaining, amount_per_month)
+         VALUES ($1, $2, $3, $4, $4, $5)`,
+        [schoolId, teacher_id, payment.id, months_advance, parseFloat(amount) / months_advance]
       );
     }
 
@@ -217,19 +219,20 @@ router.post('/pay', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // Get salary summary for dashboard
-router.get('/summary', authenticateToken, async (req, res) => {
+router.get('/summary', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month } = req.query; // Format: YYYY-MM
+    const schoolId = req.user.school_id;
 
     let monthQuery = '';
-    const params = [];
+    const params = [schoolId];
 
     if (month) {
       const [year, monthNum] = month.split('-');
-      monthQuery = 'WHERE bm.year = $1 AND bm.month = $2';
+      monthQuery = 'WHERE bm.school_id = $1 AND bm.year = $2 AND bm.month = $3';
       params.push(year, monthNum);
     } else {
-      monthQuery = 'WHERE bm.is_active = true';
+      monthQuery = 'WHERE bm.school_id = $1 AND bm.is_active = true';
     }
 
     const summaryQuery = `
@@ -245,7 +248,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
       LEFT JOIN teacher_salary_records tsr ON tsr.teacher_id = t.id
       LEFT JOIN billing_months bm ON tsr.billing_month_id = bm.id
       ${monthQuery}
-      AND t.is_active = true
+      AND t.school_id = $1 AND tsr.school_id = $1 AND t.is_active = true
     `;
 
     const result = await pool.query(summaryQuery, params);
@@ -255,9 +258,9 @@ router.get('/summary', authenticateToken, async (req, res) => {
       SELECT 
         COALESCE(SUM(tap.amount_per_month * tap.months_remaining), 0) as advance_remaining
       FROM teacher_advance_payments tap
-      WHERE tap.months_remaining > 0
+      WHERE tap.school_id = $1 AND tap.months_remaining > 0
     `;
-    const advanceResult = await pool.query(advanceQuery);
+    const advanceResult = await pool.query(advanceQuery, [schoolId]);
 
     res.json({
       summary: {
@@ -272,9 +275,10 @@ router.get('/summary', authenticateToken, async (req, res) => {
 });
 
 // Generate salary receipt PDF
-router.get('/receipt/:paymentId', authenticateToken, async (req, res) => {
+router.get('/receipt/:paymentId', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { paymentId } = req.params;
+    const schoolId = req.user.school_id;
 
     // Get payment details with teacher and month info
     const paymentResult = await pool.query(
@@ -294,8 +298,8 @@ router.get('/receipt/:paymentId', authenticateToken, async (req, res) => {
       JOIN billing_months bm ON tsp.billing_month_id = bm.id
       JOIN users u ON tsp.paid_by = u.id
       LEFT JOIN teacher_salary_records tsr ON tsr.teacher_id = t.id AND tsr.billing_month_id = bm.id
-      WHERE tsp.id = $1`,
-      [paymentId]
+      WHERE tsp.id = $1 AND tsp.school_id = $2 AND t.school_id = $2 AND bm.school_id = $2`,
+      [paymentId, schoolId]
     );
 
     if (paymentResult.rows.length === 0) {
@@ -316,7 +320,9 @@ router.get('/receipt/:paymentId', authenticateToken, async (req, res) => {
     doc.pipe(res);
 
     // Header
-    doc.fontSize(20).font('Helvetica-Bold').text('Rowdatul Iimaan School', { align: 'center' });
+    const schoolRes = await pool.query('SELECT name FROM schools WHERE id = $1', [schoolId]);
+    const schoolName = schoolRes.rows[0]?.name || 'FEE-KULMIS';
+    doc.fontSize(20).font('Helvetica-Bold').text(schoolName, { align: 'center' });
     doc.moveDown(0.5);
     doc.fontSize(16).font('Helvetica').text('Salary Payment Receipt', { align: 'center' });
     doc.moveDown(1);

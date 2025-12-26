@@ -1,25 +1,73 @@
 import express from 'express';
 import xlsx from 'xlsx';
 import PDFDocument from 'pdfkit';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import pool from '../database/db.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireSchoolContext } from '../middleware/auth.js';
 
 const router = express.Router();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+async function getSchoolBrandingForPdf(schoolId) {
+  const schoolRes = await pool.query('SELECT name, logo_path FROM schools WHERE id = $1', [schoolId]);
+  const school = schoolRes.rows[0] || {};
+  return {
+    schoolName: school.name || 'FEE-KULMIS',
+    logoPath: school.logo_path || null,
+  };
+}
+
+function resolveLocalLogoPath(logoPath) {
+  if (!logoPath || typeof logoPath !== 'string') return null;
+  // Expected: /api/uploads/schools/<schoolId>/<filename>
+  if (!logoPath.startsWith('/api/uploads/schools/')) return null;
+  const rel = logoPath.replace('/api/uploads/schools/', '');
+  return path.join(__dirname, '..', 'uploads', 'schools', rel);
+}
+
+function tryDrawSchoolLogo(doc, logoPath) {
+  try {
+    const local = resolveLocalLogoPath(logoPath);
+    if (local && fs.existsSync(local)) {
+      doc.image(local, (doc.page.width - 60) / 2, 35, { width: 60, height: 60 });
+      doc.moveDown(2.2);
+      return true;
+    }
+  } catch (_) {
+    // ignore logo failures
+  }
+  try {
+    const systemLogo = path.join(__dirname, '..', 'assets', 'systemlogo.png');
+    if (fs.existsSync(systemLogo)) {
+      doc.image(systemLogo, (doc.page.width - 60) / 2, 35, { width: 60, height: 60 });
+      doc.moveDown(2.2);
+      return true;
+    }
+  } catch (_) {
+    // ignore
+  }
+  return false;
+}
+
 // Get summary report
-router.get('/summary', authenticateToken, async (req, res) => {
+router.get('/summary', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month } = req.query; // Format: YYYY-MM
+    const schoolId = req.user.school_id;
 
     let monthQuery = '';
-    const params = [];
+    const params = [schoolId];
 
     if (month) {
       const [year, monthNum] = month.split('-');
-      monthQuery = 'WHERE bm.year = $1 AND bm.month = $2';
+      monthQuery = 'WHERE bm.school_id = $1 AND bm.year = $2 AND bm.month = $3';
       params.push(year, monthNum);
     } else {
-      monthQuery = 'WHERE bm.is_active = true';
+      monthQuery = 'WHERE bm.school_id = $1 AND bm.is_active = true';
     }
 
     // Get summary statistics
@@ -37,7 +85,8 @@ router.get('/summary', authenticateToken, async (req, res) => {
       FROM parent_month_fee pmf
       JOIN billing_months bm ON pmf.billing_month_id = bm.id
       JOIN parents p ON pmf.parent_id = p.id
-      ${monthQuery}`,
+      ${monthQuery}
+        AND pmf.school_id = $1 AND p.school_id = $1`,
       params
     );
 
@@ -49,10 +98,11 @@ router.get('/summary', authenticateToken, async (req, res) => {
         SUM(pmf.amount_paid_this_month) as collected
       FROM parent_month_fee pmf
       JOIN billing_months bm ON pmf.billing_month_id = bm.id
+      WHERE pmf.school_id = $1 AND bm.school_id = $1
       GROUP BY bm.year, bm.month
       ORDER BY bm.year DESC, bm.month DESC
       LIMIT 12`
-    );
+    , [schoolId]);
 
     // Get status distribution
     const distributionResult = await pool.query(
@@ -62,6 +112,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
       FROM parent_month_fee pmf
       JOIN billing_months bm ON pmf.billing_month_id = bm.id
       ${monthQuery}
+        AND pmf.school_id = $1
       GROUP BY pmf.status`,
       params
     );
@@ -74,7 +125,8 @@ router.get('/summary', authenticateToken, async (req, res) => {
         COALESCE(SUM(tsr.outstanding_after_payment), 0) as total_salary_outstanding
       FROM teacher_salary_records tsr
       JOIN billing_months bm ON tsr.billing_month_id = bm.id
-      ${monthQuery}`,
+      ${monthQuery}
+        AND tsr.school_id = $1`,
       params
     );
 
@@ -84,7 +136,8 @@ router.get('/summary', authenticateToken, async (req, res) => {
         COALESCE(SUM(e.amount), 0) as total_expenses
       FROM expenses e
       LEFT JOIN billing_months bm ON e.billing_month_id = bm.id
-      ${monthQuery}`,
+      ${monthQuery}
+        AND e.school_id = $1`,
       params
     );
 
@@ -124,27 +177,29 @@ function buildMonthQuery(month) {
       return { query: '', params: [], error: 'Invalid month format' };
     }
     return {
-      query: 'WHERE bm.year = $1 AND bm.month = $2',
+      query: 'WHERE bm.school_id = $1 AND bm.year = $2 AND bm.month = $3',
       params: [parseInt(year), parseInt(monthNum)]
     };
   }
   return {
-    query: 'WHERE bm.is_active = true',
+    query: 'WHERE bm.school_id = $1 AND bm.is_active = true',
     params: []
   };
 }
 
 // Export Parents Only - Excel (specific routes must come before generic)
-router.get('/export-parents-excel', authenticateToken, async (req, res) => {
+router.get('/export-parents-excel', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month } = req.query;
+    const schoolId = req.user.school_id;
     const { query: monthQuery, params } = buildMonthQuery(month);
 
     const parentQuery = `
       SELECT 
-        p.parent_name as "Parent Name",
-        p.phone_number as "Phone",
-        p.number_of_children as "Children",
+        COALESCE(p.student_name, p.parent_name) as "Student Name",
+        COALESCE(p.guardian_name, p.parent_name) as "Guardian Name",
+        COALESCE(p.guardian_phone_number, p.phone_number) as "Guardian Phone",
+        p.class_section as "Class/Section",
         p.monthly_fee_amount as "Monthly Fee",
         pmf.amount_paid_this_month as "Paid Amount",
         pmf.outstanding_after_payment as "Outstanding",
@@ -155,17 +210,18 @@ router.get('/export-parents-excel', authenticateToken, async (req, res) => {
       JOIN parents p ON pmf.parent_id = p.id
       JOIN billing_months bm ON pmf.billing_month_id = bm.id
       ${monthQuery}
-      ORDER BY p.parent_name
+        AND pmf.school_id = $1 AND p.school_id = $1
+      ORDER BY COALESCE(p.student_name, p.parent_name)
     `;
 
-    const result = await pool.query(parentQuery, params);
+    const result = await pool.query(parentQuery, [schoolId, ...params]);
     const workbook = xlsx.utils.book_new();
     const worksheet = xlsx.utils.json_to_sheet(result.rows);
-    xlsx.utils.book_append_sheet(workbook, worksheet, 'Parents');
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'Students');
     
     const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=parents-report-${month || 'active'}.xlsx`);
+    res.setHeader('Content-Disposition', `attachment; filename=students-report-${month || 'active'}.xlsx`);
     res.send(buffer);
   } catch (error) {
     console.error('Export parents Excel error:', error);
@@ -177,10 +233,57 @@ router.get('/export-parents-excel', authenticateToken, async (req, res) => {
   }
 });
 
-// Export Teachers Only - Excel
-router.get('/export-teachers-excel', authenticateToken, async (req, res) => {
+// Export Students Only - Excel (alias of export-parents-excel but implemented explicitly)
+router.get('/export-students-excel', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month } = req.query;
+    const schoolId = req.user.school_id;
+    const { query: monthQuery, params } = buildMonthQuery(month);
+
+    const q = `
+      SELECT 
+        COALESCE(p.student_name, p.parent_name) as "Student Name",
+        COALESCE(p.guardian_name, p.parent_name) as "Guardian Name",
+        COALESCE(p.guardian_phone_number, p.phone_number) as "Guardian Phone",
+        p.class_section as "Class/Section",
+        p.monthly_fee_amount as "Monthly Fee",
+        pmf.amount_paid_this_month as "Paid Amount",
+        pmf.outstanding_after_payment as "Outstanding",
+        pmf.status as "Status",
+        bm.year as "Year",
+        bm.month as "Month"
+      FROM parent_month_fee pmf
+      JOIN parents p ON pmf.parent_id = p.id
+      JOIN billing_months bm ON pmf.billing_month_id = bm.id
+      ${monthQuery}
+        AND pmf.school_id = $1 AND p.school_id = $1
+      ORDER BY COALESCE(p.student_name, p.parent_name)
+    `;
+
+    const result = await pool.query(q, [schoolId, ...params]);
+    const workbook = xlsx.utils.book_new();
+    const worksheet = xlsx.utils.json_to_sheet(result.rows);
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'Students');
+
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=students-report-${month || 'active'}.xlsx`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('Export students Excel error:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to export students Excel',
+      message: error.message
+    });
+  }
+});
+
+// Export Teachers Only - Excel
+router.get('/export-teachers-excel', authenticateToken, requireSchoolContext, async (req, res) => {
+  try {
+    const { month } = req.query;
+    const schoolId = req.user.school_id;
     const { query: monthQuery, params } = buildMonthQuery(month);
 
     const teacherQuery = `
@@ -198,10 +301,11 @@ router.get('/export-teachers-excel', authenticateToken, async (req, res) => {
       JOIN teachers t ON tsr.teacher_id = t.id
       JOIN billing_months bm ON tsr.billing_month_id = bm.id
       ${monthQuery}
+        AND tsr.school_id = $1 AND t.school_id = $1
       ORDER BY t.teacher_name
     `;
 
-    const result = await pool.query(teacherQuery, params);
+    const result = await pool.query(teacherQuery, [schoolId, ...params]);
     const workbook = xlsx.utils.book_new();
     const worksheet = xlsx.utils.json_to_sheet(result.rows);
     xlsx.utils.book_append_sheet(workbook, worksheet, 'Teachers');
@@ -221,9 +325,10 @@ router.get('/export-teachers-excel', authenticateToken, async (req, res) => {
 });
 
 // Export Expenses Only - Excel
-router.get('/export-expenses-excel', authenticateToken, async (req, res) => {
+router.get('/export-expenses-excel', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month } = req.query;
+    const schoolId = req.user.school_id;
     let expensesQuery = `
       SELECT 
         e.expense_date as "Date",
@@ -239,10 +344,11 @@ router.get('/export-expenses-excel', authenticateToken, async (req, res) => {
     const expenseParams = [];
     if (month) {
       const [year, monthNum] = month.split('-');
-      expensesQuery += ' WHERE (bm.year = $1 AND bm.month = $2) OR (bm.id IS NULL AND EXTRACT(YEAR FROM e.expense_date) = $1 AND EXTRACT(MONTH FROM e.expense_date) = $2)';
-      expenseParams.push(parseInt(year), parseInt(monthNum));
+      expensesQuery += ' WHERE e.school_id = $1 AND ec.school_id = $1 AND ((bm.year = $2 AND bm.month = $3) OR (bm.id IS NULL AND EXTRACT(YEAR FROM e.expense_date) = $2 AND EXTRACT(MONTH FROM e.expense_date) = $3))';
+      expenseParams.push(schoolId, parseInt(year), parseInt(monthNum));
     } else {
-      expensesQuery += ' WHERE bm.is_active = true OR bm.id IS NULL';
+      expensesQuery += ' WHERE e.school_id = $1 AND ec.school_id = $1 AND (bm.is_active = true OR bm.id IS NULL)';
+      expenseParams.push(schoolId);
     }
     expensesQuery += ' ORDER BY e.expense_date DESC';
 
@@ -266,15 +372,18 @@ router.get('/export-expenses-excel', authenticateToken, async (req, res) => {
 });
 
 // Export Parents Only - PDF
-router.get('/export-parents-pdf', authenticateToken, async (req, res) => {
+router.get('/export-parents-pdf', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month } = req.query;
+    const schoolId = req.user.school_id;
     const { query: monthQuery, params } = buildMonthQuery(month);
 
     const parentQuery = `
       SELECT 
-        p.parent_name,
-        p.phone_number,
+        COALESCE(p.student_name, p.parent_name) as student_name,
+        COALESCE(p.guardian_name, p.parent_name) as guardian_name,
+        COALESCE(p.guardian_phone_number, p.phone_number) as guardian_phone_number,
+        p.class_section,
         p.monthly_fee_amount,
         pmf.amount_paid_this_month,
         pmf.outstanding_after_payment,
@@ -283,10 +392,11 @@ router.get('/export-parents-pdf', authenticateToken, async (req, res) => {
       JOIN parents p ON pmf.parent_id = p.id
       JOIN billing_months bm ON pmf.billing_month_id = bm.id
       ${monthQuery}
-      ORDER BY p.parent_name
+        AND pmf.school_id = $1 AND p.school_id = $1
+      ORDER BY COALESCE(p.student_name, p.parent_name)
     `;
 
-    const result = await pool.query(parentQuery, params);
+    const result = await pool.query(parentQuery, [schoolId, ...params]);
     
     let monthInfo = 'Current Active Month';
     if (month) {
@@ -296,12 +406,14 @@ router.get('/export-parents-pdf', authenticateToken, async (req, res) => {
 
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=parents-report-${month || 'active'}.pdf`);
+    res.setHeader('Content-Disposition', `attachment; filename=students-report-${month || 'active'}.pdf`);
     doc.pipe(res);
 
-    doc.fontSize(20).font('Helvetica-Bold').text('Rowdatul Iimaan School', { align: 'center' });
+    const { schoolName, logoPath } = await getSchoolBrandingForPdf(schoolId);
+    tryDrawSchoolLogo(doc, logoPath);
+    doc.fontSize(20).font('Helvetica-Bold').text(schoolName, { align: 'center' });
     doc.moveDown(0.5);
-    doc.fontSize(16).font('Helvetica').text('Parents Fee Report', { align: 'center' });
+    doc.fontSize(16).font('Helvetica').text('Students Fee Report', { align: 'center' });
     doc.fontSize(12).text(`Period: ${monthInfo}`, { align: 'center' });
     doc.moveDown(1);
     doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
@@ -309,8 +421,8 @@ router.get('/export-parents-pdf', authenticateToken, async (req, res) => {
 
     if (result.rows.length > 0) {
       doc.fontSize(10).font('Helvetica-Bold');
-      doc.text('Parent Name', 50, doc.y, { width: 120 });
-      doc.text('Phone', 170, doc.y, { width: 90 });
+      doc.text('Student Name', 50, doc.y, { width: 120 });
+      doc.text('Guardian Phone', 170, doc.y, { width: 90 });
       doc.text('Fee', 260, doc.y, { width: 70 });
       doc.text('Paid', 330, doc.y, { width: 70 });
       doc.text('Outstanding', 400, doc.y, { width: 80 });
@@ -324,8 +436,8 @@ router.get('/export-parents-pdf', authenticateToken, async (req, res) => {
         if (doc.y > 750) {
           doc.addPage();
           doc.fontSize(10).font('Helvetica-Bold');
-          doc.text('Parent Name', 50, 50, { width: 120 });
-          doc.text('Phone', 170, 50, { width: 90 });
+          doc.text('Student Name', 50, 50, { width: 120 });
+          doc.text('Guardian Phone', 170, 50, { width: 90 });
           doc.text('Fee', 260, 50, { width: 70 });
           doc.text('Paid', 330, 50, { width: 70 });
           doc.text('Outstanding', 400, 50, { width: 80 });
@@ -335,8 +447,8 @@ router.get('/export-parents-pdf', authenticateToken, async (req, res) => {
           doc.moveDown(0.3);
           doc.font('Helvetica').fontSize(9);
         }
-        doc.text(row.parent_name || '-', 50, doc.y, { width: 120 });
-        doc.text(row.phone_number || '-', 170, doc.y, { width: 90 });
+        doc.text(row.student_name || '-', 50, doc.y, { width: 120 });
+        doc.text(row.guardian_phone_number || '-', 170, doc.y, { width: 90 });
         doc.text(`$${parseFloat(row.monthly_fee_amount || 0).toFixed(2)}`, 260, doc.y, { width: 70 });
         doc.text(`$${parseFloat(row.amount_paid_this_month || 0).toFixed(2)}`, 330, doc.y, { width: 70 });
         doc.text(`$${parseFloat(row.outstanding_after_payment || 0).toFixed(2)}`, 400, doc.y, { width: 80 });
@@ -360,10 +472,112 @@ router.get('/export-parents-pdf', authenticateToken, async (req, res) => {
   }
 });
 
-// Export Teachers Only - PDF
-router.get('/export-teachers-pdf', authenticateToken, async (req, res) => {
+// Export Students Only - PDF (alias of export-parents-pdf but implemented explicitly)
+router.get('/export-students-pdf', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month } = req.query;
+    const schoolId = req.user.school_id;
+    const { query: monthQuery, params } = buildMonthQuery(month);
+
+    const q = `
+      SELECT 
+        COALESCE(p.student_name, p.parent_name) as student_name,
+        COALESCE(p.guardian_name, p.parent_name) as guardian_name,
+        COALESCE(p.guardian_phone_number, p.phone_number) as guardian_phone_number,
+        p.class_section,
+        p.monthly_fee_amount,
+        pmf.amount_paid_this_month,
+        pmf.outstanding_after_payment,
+        pmf.status
+      FROM parent_month_fee pmf
+      JOIN parents p ON pmf.parent_id = p.id
+      JOIN billing_months bm ON pmf.billing_month_id = bm.id
+      ${monthQuery}
+        AND pmf.school_id = $1 AND p.school_id = $1
+      ORDER BY COALESCE(p.student_name, p.parent_name)
+    `;
+
+    const result = await pool.query(q, [schoolId, ...params]);
+    
+    let monthInfo = 'Current Active Month';
+    if (month) {
+      const [year, monthNum] = month.split('-');
+      monthInfo = new Date(year, monthNum - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    }
+
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=students-report-${month || 'active'}.pdf`);
+    doc.pipe(res);
+
+    const { schoolName, logoPath } = await getSchoolBrandingForPdf(schoolId);
+    tryDrawSchoolLogo(doc, logoPath);
+    doc.fontSize(20).font('Helvetica-Bold').text(schoolName, { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(16).font('Helvetica').text('Students Fee Report', { align: 'center' });
+    doc.fontSize(12).text(`Period: ${monthInfo}`, { align: 'center' });
+    doc.moveDown(1);
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(1);
+
+    if (result.rows.length > 0) {
+      doc.fontSize(10).font('Helvetica-Bold');
+      doc.text('Student Name', 50, doc.y, { width: 120 });
+      doc.text('Guardian Phone', 170, doc.y, { width: 90 });
+      doc.text('Fee', 260, doc.y, { width: 70 });
+      doc.text('Paid', 330, doc.y, { width: 70 });
+      doc.text('Outstanding', 400, doc.y, { width: 80 });
+      doc.text('Status', 480, doc.y, { width: 65 });
+      doc.moveDown(0.5);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+      doc.moveDown(0.3);
+      doc.font('Helvetica').fontSize(9);
+
+      result.rows.forEach((row) => {
+        if (doc.y > 750) {
+          doc.addPage();
+          doc.fontSize(10).font('Helvetica-Bold');
+          doc.text('Student Name', 50, 50, { width: 120 });
+          doc.text('Guardian Phone', 170, 50, { width: 90 });
+          doc.text('Fee', 260, 50, { width: 70 });
+          doc.text('Paid', 330, 50, { width: 70 });
+          doc.text('Outstanding', 400, 50, { width: 80 });
+          doc.text('Status', 480, 50, { width: 65 });
+          doc.moveDown(0.5);
+          doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+          doc.moveDown(0.3);
+          doc.font('Helvetica').fontSize(9);
+        }
+        doc.text(row.student_name || '-', 50, doc.y, { width: 120 });
+        doc.text(row.guardian_phone_number || '-', 170, doc.y, { width: 90 });
+        doc.text(`$${parseFloat(row.monthly_fee_amount || 0).toFixed(2)}`, 260, doc.y, { width: 70 });
+        doc.text(`$${parseFloat(row.amount_paid_this_month || 0).toFixed(2)}`, 330, doc.y, { width: 70 });
+        doc.text(`$${parseFloat(row.outstanding_after_payment || 0).toFixed(2)}`, 400, doc.y, { width: 80 });
+        doc.text(row.status || '-', 480, doc.y, { width: 65 });
+        doc.moveDown(0.4);
+      });
+    }
+
+    doc.moveDown(1);
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(1);
+    doc.fontSize(10).font('Helvetica').text(`Generated on: ${new Date().toLocaleDateString()}`, { align: 'center' });
+    doc.end();
+  } catch (error) {
+    console.error('Export students PDF error:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to export students PDF',
+      message: error.message
+    });
+  }
+});
+
+// Export Teachers Only - PDF
+router.get('/export-teachers-pdf', authenticateToken, requireSchoolContext, async (req, res) => {
+  try {
+    const { month } = req.query;
+    const schoolId = req.user.school_id;
     const { query: monthQuery, params } = buildMonthQuery(month);
 
     const teacherQuery = `
@@ -379,10 +593,11 @@ router.get('/export-teachers-pdf', authenticateToken, async (req, res) => {
       JOIN teachers t ON tsr.teacher_id = t.id
       JOIN billing_months bm ON tsr.billing_month_id = bm.id
       ${monthQuery}
+      AND tsr.school_id = $1 AND t.school_id = $1
       ORDER BY t.teacher_name
     `;
 
-    const result = await pool.query(teacherQuery, params);
+    const result = await pool.query(teacherQuery, [schoolId, ...params]);
     
     let monthInfo = 'Current Active Month';
     if (month) {
@@ -395,7 +610,9 @@ router.get('/export-teachers-pdf', authenticateToken, async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename=teachers-report-${month || 'active'}.pdf`);
     doc.pipe(res);
 
-    doc.fontSize(20).font('Helvetica-Bold').text('Rowdatul Iimaan School', { align: 'center' });
+    const { schoolName, logoPath } = await getSchoolBrandingForPdf(schoolId);
+    tryDrawSchoolLogo(doc, logoPath);
+    doc.fontSize(20).font('Helvetica-Bold').text(schoolName, { align: 'center' });
     doc.moveDown(0.5);
     doc.fontSize(16).font('Helvetica').text('Teachers Salary Report', { align: 'center' });
     doc.fontSize(12).text(`Period: ${monthInfo}`, { align: 'center' });
@@ -459,9 +676,10 @@ router.get('/export-teachers-pdf', authenticateToken, async (req, res) => {
 });
 
 // Export Expenses Only - PDF
-router.get('/export-expenses-pdf', authenticateToken, async (req, res) => {
+router.get('/export-expenses-pdf', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month } = req.query;
+    const schoolId = req.user.school_id;
     let expensesQuery = `
       SELECT 
         e.expense_date,
@@ -475,14 +693,15 @@ router.get('/export-expenses-pdf', authenticateToken, async (req, res) => {
     const expenseParams = [];
     if (month) {
       const [year, monthNum] = month.split('-');
-      expensesQuery += ' WHERE (bm.year = $1 AND bm.month = $2) OR (bm.id IS NULL AND EXTRACT(YEAR FROM e.expense_date) = $1 AND EXTRACT(MONTH FROM e.expense_date) = $2)';
-      expenseParams.push(parseInt(year), parseInt(monthNum));
+      expensesQuery += ' WHERE e.school_id = $1 AND ec.school_id = $1 AND ((bm.year = $2 AND bm.month = $3) OR (bm.id IS NULL AND EXTRACT(YEAR FROM e.expense_date) = $2 AND EXTRACT(MONTH FROM e.expense_date) = $3))';
+      expenseParams.push(schoolId, parseInt(year), parseInt(monthNum));
     } else {
-      expensesQuery += ' WHERE bm.is_active = true OR bm.id IS NULL';
+      expensesQuery += ' WHERE e.school_id = $1 AND ec.school_id = $1 AND (bm.is_active = true OR bm.id IS NULL)';
+      expenseParams.push(schoolId);
     }
     expensesQuery += ' ORDER BY e.expense_date DESC';
 
-    const result = await pool.query(expensesQuery, month ? expenseParams : []);
+    const result = await pool.query(expensesQuery, expenseParams);
     
     let monthInfo = 'Current Active Month';
     if (month) {
@@ -495,7 +714,9 @@ router.get('/export-expenses-pdf', authenticateToken, async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename=expenses-report-${month || 'active'}.pdf`);
     doc.pipe(res);
 
-    doc.fontSize(20).font('Helvetica-Bold').text('Rowdatul Iimaan School', { align: 'center' });
+    const { schoolName, logoPath } = await getSchoolBrandingForPdf(schoolId);
+    tryDrawSchoolLogo(doc, logoPath);
+    doc.fontSize(20).font('Helvetica-Bold').text(schoolName, { align: 'center' });
     doc.moveDown(0.5);
     doc.fontSize(16).font('Helvetica').text('Expenses Report', { align: 'center' });
     doc.fontSize(12).text(`Period: ${monthInfo}`, { align: 'center' });
@@ -554,9 +775,10 @@ router.get('/export-expenses-pdf', authenticateToken, async (req, res) => {
 });
 
 // Export to Excel (All Reports - generic route comes after specific ones)
-router.get('/export-excel', authenticateToken, async (req, res) => {
+router.get('/export-excel', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month } = req.query; // Format: YYYY-MM
+    const schoolId = req.user.school_id;
 
     let monthQuery = '';
     const params = [];
@@ -566,20 +788,22 @@ router.get('/export-excel', authenticateToken, async (req, res) => {
       if (!year || !monthNum) {
         return res.status(400).json({ error: 'Invalid month format. Use YYYY-MM' });
       }
-      monthQuery = 'WHERE bm.year = $1 AND bm.month = $2';
-      params.push(parseInt(year), parseInt(monthNum));
+      monthQuery = 'WHERE bm.school_id = $1 AND bm.year = $2 AND bm.month = $3';
+      params.push(schoolId, parseInt(year), parseInt(monthNum));
     } else {
-      monthQuery = 'WHERE bm.is_active = true';
+      monthQuery = 'WHERE bm.school_id = $1 AND bm.is_active = true';
+      params.push(schoolId);
     }
 
-    // 1. Parent Fee Records - Handle empty results gracefully
+    // 1. Student Fee Records - Handle empty results gracefully
     let parentResult = { rows: [] };
     try {
       const parentQuery = `
         SELECT 
-          p.parent_name as "Parent Name",
-          p.phone_number as "Phone",
-          p.number_of_children as "Children",
+          COALESCE(p.student_name, p.parent_name) as "Student Name",
+          COALESCE(p.guardian_name, p.parent_name) as "Guardian Name",
+          COALESCE(p.guardian_phone_number, p.phone_number) as "Guardian Phone",
+          p.class_section as "Class/Section",
           p.monthly_fee_amount as "Monthly Fee",
           pmf.amount_paid_this_month as "Paid Amount",
           pmf.outstanding_after_payment as "Outstanding",
@@ -590,7 +814,8 @@ router.get('/export-excel', authenticateToken, async (req, res) => {
         JOIN parents p ON pmf.parent_id = p.id
         JOIN billing_months bm ON pmf.billing_month_id = bm.id
         ${monthQuery}
-        ORDER BY p.parent_name
+        AND pmf.school_id = $1 AND p.school_id = $1
+        ORDER BY COALESCE(p.student_name, p.parent_name)
       `;
       parentResult = await pool.query(parentQuery, params);
     } catch (err) {
@@ -616,6 +841,7 @@ router.get('/export-excel', authenticateToken, async (req, res) => {
         JOIN teachers t ON tsr.teacher_id = t.id
         JOIN billing_months bm ON tsr.billing_month_id = bm.id
         ${monthQuery}
+        AND tsr.school_id = $1 AND t.school_id = $1
         ORDER BY t.teacher_name
       `;
       teacherSalaryResult = await pool.query(teacherSalaryQuery, params);
@@ -643,10 +869,12 @@ router.get('/export-excel', authenticateToken, async (req, res) => {
       const expenseParams = [];
       if (month) {
         const [year, monthNum] = month.split('-');
-        expensesQuery += ' WHERE (bm.year = $1 AND bm.month = $2) OR (bm.id IS NULL AND EXTRACT(YEAR FROM e.expense_date) = $1 AND EXTRACT(MONTH FROM e.expense_date) = $2)';
-        expenseParams.push(parseInt(year), parseInt(monthNum));
+        expensesQuery += ' WHERE e.school_id = $1 AND ec.school_id = $1 AND ((bm.year = $2 AND bm.month = $3) OR (bm.id IS NULL AND EXTRACT(YEAR FROM e.expense_date) = $2 AND EXTRACT(MONTH FROM e.expense_date) = $3))';
+        expenseParams.push(schoolId, parseInt(year), parseInt(monthNum));
       } else {
-        expensesQuery += ' WHERE bm.is_active = true OR bm.id IS NULL';
+        expensesQuery += ' WHERE e.school_id = $1 AND ec.school_id = $1 AND (bm.is_active = true OR bm.id IS NULL';
+        expensesQuery += ')';
+        expenseParams.push(schoolId);
       }
 
       expensesQuery += ' ORDER BY e.expense_date DESC';
@@ -682,7 +910,7 @@ router.get('/export-excel', authenticateToken, async (req, res) => {
 
     // Get summary data - Handle empty results
     let summaryRow = {
-      'Total Parents': 0,
+      'Total Students': 0,
       'Total Teachers': 0,
       'Total Fees Collected': 0,
       'Total Outstanding Fees': 0,
@@ -737,10 +965,10 @@ router.get('/export-excel', authenticateToken, async (req, res) => {
     const summarySheet = xlsx.utils.json_to_sheet(summaryArray);
     xlsx.utils.book_append_sheet(workbook, summarySheet, 'Summary');
     
-    // Parent Fee Records sheet
+    // Student Fee Records sheet
     if (parentResult.rows.length > 0) {
       const parentSheet = xlsx.utils.json_to_sheet(parentResult.rows);
-      xlsx.utils.book_append_sheet(workbook, parentSheet, 'Parent Fees');
+      xlsx.utils.book_append_sheet(workbook, parentSheet, 'Student Fees');
     }
     
     // Teacher Salary Records sheet
@@ -774,19 +1002,21 @@ router.get('/export-excel', authenticateToken, async (req, res) => {
 });
 
 // Export financial report to PDF
-router.get('/export-pdf', authenticateToken, async (req, res) => {
+router.get('/export-pdf', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month } = req.query; // Format: YYYY-MM
+    const schoolId = req.user.school_id;
 
     let monthQuery = '';
     const params = [];
 
     if (month) {
       const [year, monthNum] = month.split('-');
-      monthQuery = 'WHERE bm.year = $1 AND bm.month = $2';
-      params.push(year, monthNum);
+      monthQuery = 'WHERE bm.school_id = $1 AND bm.year = $2 AND bm.month = $3';
+      params.push(schoolId, year, monthNum);
     } else {
-      monthQuery = 'WHERE bm.is_active = true';
+      monthQuery = 'WHERE bm.school_id = $1 AND bm.is_active = true';
+      params.push(schoolId);
     }
 
     // Get all summary data
@@ -927,7 +1157,9 @@ router.get('/export-pdf', authenticateToken, async (req, res) => {
     doc.pipe(res);
 
     // Header with better formatting
-    doc.fontSize(24).font('Helvetica-Bold').fillColor('#1f2937').text('Rowdatul Iimaan School', { align: 'center' });
+    const { schoolName, logoPath } = await getSchoolBrandingForPdf(schoolId);
+    tryDrawSchoolLogo(doc, logoPath);
+    doc.fontSize(24).font('Helvetica-Bold').fillColor('#1f2937').text(schoolName, { align: 'center' });
     doc.moveDown(0.3);
     doc.fontSize(18).font('Helvetica-Bold').fillColor('#374151').text('Complete Financial Report', { align: 'center' });
     doc.moveDown(0.3);
@@ -938,14 +1170,14 @@ router.get('/export-pdf', authenticateToken, async (req, res) => {
     doc.strokeColor('#000000').lineWidth(1);
     doc.moveDown(1.5);
 
-    // Parent Fees Section with better alignment
-    doc.fontSize(16).font('Helvetica-Bold').fillColor('#1f2937').text('Parent Fees Summary', 50, doc.y);
+    // Student Fees Section with better alignment
+    doc.fontSize(16).font('Helvetica-Bold').fillColor('#1f2937').text('Student Fees Summary', 50, doc.y);
     doc.moveDown(0.8);
     doc.fontSize(11).font('Helvetica');
     doc.fillColor('#000000');
     
     const feeData = [
-      ['Total Parents:', parentData.total_parents || 0],
+      ['Total Students:', parentData.total_parents || 0],
       ['Fully Paid:', parentData.paid_count || 0],
       ['Unpaid:', parentData.unpaid_count || 0],
       ['Partial:', parentData.partial_count || 0],
@@ -1042,14 +1274,14 @@ router.get('/export-pdf', authenticateToken, async (req, res) => {
     doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
     doc.moveDown(1);
 
-    // Detailed Parent Fees Section with better formatting
+    // Detailed Student Fees Section with better formatting
     if (parentDetailsResult.rows.length > 0) {
       if (doc.y > 650) {
         doc.addPage();
         doc.y = 50;
       }
       
-      doc.fontSize(16).font('Helvetica-Bold').fillColor('#1f2937').text('Detailed Parent Fee Records', 50, doc.y);
+      doc.fontSize(16).font('Helvetica-Bold').fillColor('#1f2937').text('Detailed Student Fee Records', 50, doc.y);
       doc.moveDown(0.8);
       doc.fontSize(10).font('Helvetica');
       doc.fillColor('#000000');
@@ -1057,8 +1289,8 @@ router.get('/export-pdf', authenticateToken, async (req, res) => {
       // Table headers with better alignment
       doc.font('Helvetica-Bold').fontSize(10);
       const headerY = doc.y;
-      doc.text('Parent Name', 50, headerY, { width: 120 });
-      doc.text('Phone', 170, headerY, { width: 90 });
+      doc.text('Student Name', 50, headerY, { width: 120 });
+      doc.text('Guardian Phone', 170, headerY, { width: 90 });
       doc.text('Fee', 260, headerY, { width: 70 });
       doc.text('Paid', 330, headerY, { width: 70 });
       doc.text('Outstanding', 400, headerY, { width: 80 });
@@ -1075,8 +1307,8 @@ router.get('/export-pdf', authenticateToken, async (req, res) => {
           doc.addPage();
           currentY = 50;
           doc.fontSize(10).font('Helvetica-Bold');
-          doc.text('Parent Name', 50, currentY, { width: 120 });
-          doc.text('Phone', 170, currentY, { width: 90 });
+          doc.text('Student Name', 50, currentY, { width: 120 });
+          doc.text('Guardian Phone', 170, currentY, { width: 90 });
           doc.text('Fee', 260, currentY, { width: 70 });
           doc.text('Paid', 330, currentY, { width: 70 });
           doc.text('Outstanding', 400, currentY, { width: 80 });
@@ -1089,8 +1321,8 @@ router.get('/export-pdf', authenticateToken, async (req, res) => {
         }
 
         doc.fontSize(9);
-        doc.text(row.parent_name || '-', 50, currentY, { width: 120 });
-        doc.text(row.phone_number || '-', 170, currentY, { width: 90 });
+        doc.text(row.student_name || row.parent_name || '-', 50, currentY, { width: 120 });
+        doc.text(row.guardian_phone_number || row.phone_number || '-', 170, currentY, { width: 90 });
         doc.text(`$${parseFloat(row.monthly_fee_amount || 0).toFixed(2)}`, 260, currentY, { width: 70 });
         doc.text(`$${parseFloat(row.amount_paid_this_month || 0).toFixed(2)}`, 330, currentY, { width: 70 });
         doc.text(`$${parseFloat(row.outstanding_after_payment || 0).toFixed(2)}`, 400, currentY, { width: 80 });

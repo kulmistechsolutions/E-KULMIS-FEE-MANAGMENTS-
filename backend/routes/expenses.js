@@ -1,14 +1,17 @@
 import express from 'express';
 import pool from '../database/db.js';
-import { authenticateToken, requireAdmin } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin, requireSchoolContext } from '../middleware/auth.js';
 import xlsx from 'xlsx';
 
 const router = express.Router();
 
 // Get all expense categories
-router.get('/categories', authenticateToken, async (req, res) => {
+router.get('/categories', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM expense_categories ORDER BY category_name');
+    const result = await pool.query(
+      'SELECT * FROM expense_categories WHERE school_id = $1 ORDER BY category_name',
+      [req.user.school_id]
+    );
     res.json(result.rows);
   } catch (error) {
     console.error('Get expense categories error:', error);
@@ -17,18 +20,19 @@ router.get('/categories', authenticateToken, async (req, res) => {
 });
 
 // Create expense category - Admin only
-router.post('/categories', authenticateToken, requireAdmin, async (req, res) => {
+router.post('/categories', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { category_name, description } = req.body;
+    const schoolId = req.user.school_id;
 
     if (!category_name) {
       return res.status(400).json({ error: 'Category name is required' });
     }
 
     const result = await pool.query(
-      `INSERT INTO expense_categories (category_name, description)
-       VALUES ($1, $2) RETURNING *`,
-      [category_name, description || null]
+      `INSERT INTO expense_categories (school_id, category_name, description)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [schoolId, category_name, description || null]
     );
 
     // Emit real-time update via Socket.io
@@ -48,10 +52,11 @@ router.post('/categories', authenticateToken, requireAdmin, async (req, res) => 
 });
 
 // Update expense category - Admin only
-router.put('/categories/:id', authenticateToken, requireAdmin, async (req, res) => {
+router.put('/categories/:id', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { category_name, description } = req.body;
+    const schoolId = req.user.school_id;
 
     if (!category_name) {
       return res.status(400).json({ error: 'Category name is required' });
@@ -60,8 +65,8 @@ router.put('/categories/:id', authenticateToken, requireAdmin, async (req, res) 
     const result = await pool.query(
       `UPDATE expense_categories 
        SET category_name = $1, description = $2
-       WHERE id = $3 RETURNING *`,
-      [category_name, description || null, id]
+       WHERE id = $3 AND school_id = $4 RETURNING *`,
+      [category_name, description || null, id, schoolId]
     );
 
     if (result.rows.length === 0) {
@@ -85,18 +90,19 @@ router.put('/categories/:id', authenticateToken, requireAdmin, async (req, res) 
 });
 
 // Delete expense category - Admin only
-router.delete('/categories/:id', authenticateToken, requireAdmin, async (req, res) => {
+router.delete('/categories/:id', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const schoolId = req.user.school_id;
 
     // Check if category exists
-    const categoryResult = await pool.query('SELECT * FROM expense_categories WHERE id = $1', [id]);
+    const categoryResult = await pool.query('SELECT * FROM expense_categories WHERE id = $1 AND school_id = $2', [id, schoolId]);
     if (categoryResult.rows.length === 0) {
       return res.status(404).json({ error: 'Category not found' });
     }
 
     // Check if category is being used by any expenses
-    const expensesCheck = await pool.query('SELECT COUNT(*) as count FROM expenses WHERE category_id = $1', [id]);
+    const expensesCheck = await pool.query('SELECT COUNT(*) as count FROM expenses WHERE school_id = $1 AND category_id = $2', [schoolId, id]);
     const expenseCount = parseInt(expensesCheck.rows[0].count);
 
     if (expenseCount > 0) {
@@ -105,7 +111,7 @@ router.delete('/categories/:id', authenticateToken, requireAdmin, async (req, re
       });
     }
 
-    await pool.query('DELETE FROM expense_categories WHERE id = $1', [id]);
+    await pool.query('DELETE FROM expense_categories WHERE id = $1 AND school_id = $2', [id, schoolId]);
 
     // Emit real-time update via Socket.io
     const io = req.app.get('io');
@@ -121,10 +127,11 @@ router.delete('/categories/:id', authenticateToken, requireAdmin, async (req, re
 });
 
 // Get all expenses
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month, category_id, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
+    const schoolId = req.user.school_id;
 
     let query = `
       SELECT 
@@ -137,9 +144,9 @@ router.get('/', authenticateToken, async (req, res) => {
       JOIN expense_categories ec ON e.category_id = ec.id
       LEFT JOIN billing_months bm ON e.billing_month_id = bm.id
       JOIN users u ON e.created_by = u.id
-      WHERE 1=1
+      WHERE e.school_id = $1 AND ec.school_id = $1
     `;
-    const params = [];
+    const params = [schoolId];
 
     if (month) {
       const [year, monthNum] = month.split('-');
@@ -162,9 +169,9 @@ router.get('/', authenticateToken, async (req, res) => {
       SELECT COUNT(*) FROM expenses e
       JOIN expense_categories ec ON e.category_id = ec.id
       LEFT JOIN billing_months bm ON e.billing_month_id = bm.id
-      WHERE 1=1
+      WHERE e.school_id = $1 AND ec.school_id = $1
     `;
-    const countParams = [];
+    const countParams = [schoolId];
     if (month) {
       const [year, monthNum] = month.split('-');
       countQuery += ` AND bm.year = $${countParams.length + 1} AND bm.month = $${countParams.length + 2}`;
@@ -189,19 +196,20 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // Get expense summary
-router.get('/summary', authenticateToken, async (req, res) => {
+router.get('/summary', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month } = req.query; // Format: YYYY-MM
+    const schoolId = req.user.school_id;
 
     let monthQuery = '';
-    const params = [];
+    const params = [schoolId];
 
     if (month) {
       const [year, monthNum] = month.split('-');
-      monthQuery = 'WHERE bm.year = $1 AND bm.month = $2';
+      monthQuery = 'WHERE e.school_id = $1 AND bm.year = $2 AND bm.month = $3';
       params.push(year, monthNum);
     } else {
-      monthQuery = 'WHERE bm.is_active = true';
+      monthQuery = 'WHERE e.school_id = $1 AND bm.is_active = true';
     }
 
     const summaryQuery = `
@@ -224,7 +232,8 @@ router.get('/summary', authenticateToken, async (req, res) => {
       FROM expense_categories ec
       LEFT JOIN expenses e ON ec.id = e.category_id
       LEFT JOIN billing_months bm ON e.billing_month_id = bm.id
-      ${monthQuery}
+      WHERE ec.school_id = $1
+      ${month ? ' AND bm.year = $2 AND bm.month = $3' : ' AND bm.is_active = true'}
       GROUP BY ec.id, ec.category_name
       ORDER BY category_total DESC
     `;
@@ -242,19 +251,20 @@ router.get('/summary', authenticateToken, async (req, res) => {
 });
 
 // Create expense
-router.post('/', authenticateToken, requireAdmin, async (req, res) => {
+router.post('/', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { category_id, amount, expense_date, billing_month_id, notes } = req.body;
     const created_by = req.user.id;
+    const schoolId = req.user.school_id;
 
     if (!category_id || !amount || !expense_date) {
       return res.status(400).json({ error: 'Category, amount, and expense date are required' });
     }
 
     const result = await pool.query(
-      `INSERT INTO expenses (category_id, amount, expense_date, billing_month_id, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [category_id, amount, expense_date, billing_month_id || null, notes || null, created_by]
+      `INSERT INTO expenses (school_id, category_id, amount, expense_date, billing_month_id, notes, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [schoolId, category_id, amount, expense_date, billing_month_id || null, notes || null, created_by]
     );
 
     // Emit real-time update via Socket.io
@@ -272,10 +282,11 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // Update expense
-router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
+router.put('/:id', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { category_id, amount, expense_date, billing_month_id, notes } = req.body;
+    const schoolId = req.user.school_id;
 
     const result = await pool.query(
       `UPDATE expenses 
@@ -284,8 +295,8 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
            expense_date = COALESCE($3, expense_date),
            billing_month_id = COALESCE($4, billing_month_id),
            notes = COALESCE($5, notes)
-       WHERE id = $6 RETURNING *`,
-      [category_id, amount, expense_date, billing_month_id, notes, id]
+       WHERE id = $6 AND school_id = $7 RETURNING *`,
+      [category_id, amount, expense_date, billing_month_id, notes, id, schoolId]
     );
 
     if (result.rows.length === 0) {
@@ -307,17 +318,18 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // Delete expense
-router.delete('/:id', authenticateToken, requireAdmin, async (req, res) => {
+router.delete('/:id', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const schoolId = req.user.school_id;
 
     // Check if expense exists
-    const expenseResult = await pool.query('SELECT * FROM expenses WHERE id = $1', [id]);
+    const expenseResult = await pool.query('SELECT * FROM expenses WHERE id = $1 AND school_id = $2', [id, schoolId]);
     if (expenseResult.rows.length === 0) {
       return res.status(404).json({ error: 'Expense not found' });
     }
 
-    await pool.query('DELETE FROM expenses WHERE id = $1', [id]);
+    await pool.query('DELETE FROM expenses WHERE id = $1 AND school_id = $2', [id, schoolId]);
 
     // Emit real-time update via Socket.io
     const io = req.app.get('io');
@@ -334,9 +346,10 @@ router.delete('/:id', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // Export expenses to Excel
-router.get('/export', authenticateToken, async (req, res) => {
+router.get('/export', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month, category_id } = req.query;
+    const schoolId = req.user.school_id;
 
     let query = `
       SELECT 
@@ -353,9 +366,9 @@ router.get('/export', authenticateToken, async (req, res) => {
       JOIN expense_categories ec ON e.category_id = ec.id
       LEFT JOIN billing_months bm ON e.billing_month_id = bm.id
       JOIN users u ON e.created_by = u.id
-      WHERE 1=1
+      WHERE e.school_id = $1 AND ec.school_id = $1
     `;
-    const params = [];
+    const params = [schoolId];
 
     if (month) {
       const [year, monthNum] = month.split('-');

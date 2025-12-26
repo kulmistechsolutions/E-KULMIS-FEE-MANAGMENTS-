@@ -2,13 +2,13 @@ import express from 'express';
 import multer from 'multer';
 import xlsx from 'xlsx';
 import pool from '../database/db.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireSchoolContext } from '../middleware/auth.js';
 
 const router = express.Router();
 const upload = multer({ dest: 'uploads/' });
 
-// Get all parents
-router.get('/', authenticateToken, async (req, res) => {
+// Get all students (legacy: parents)
+router.get('/', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { search, page = 1, limit = 50, month_id, status } = req.query;
     const offset = (page - 1) * limit;
@@ -16,7 +16,9 @@ router.get('/', authenticateToken, async (req, res) => {
     // Build query based on filters
     let query;
     const params = [];
-    let paramIndex = 1;
+    const schoolId = req.user.school_id;
+    params.push(schoolId);
+    let paramIndex = 2;
 
     // If filtering by month_id, use a different approach
     if (month_id) {
@@ -26,19 +28,25 @@ router.get('/', authenticateToken, async (req, res) => {
           COALESCE(
             (SELECT SUM(outstanding_after_payment) 
              FROM parent_month_fee 
-             WHERE parent_id = p.id), 
+             WHERE parent_id = p.id AND school_id = $1), 
             0
           ) as total_outstanding,
           pmf.status as current_month_status
         FROM parents p
         INNER JOIN parent_month_fee pmf ON pmf.parent_id = p.id
-        WHERE pmf.billing_month_id = $${paramIndex}
+        WHERE p.school_id = $1
+          AND pmf.school_id = $1
+          AND pmf.billing_month_id = $${paramIndex}
       `;
       params.push(parseInt(month_id));
       paramIndex++;
 
       if (search) {
-        query += ` AND (p.parent_name ILIKE $${paramIndex} OR p.phone_number ILIKE $${paramIndex})`;
+        query += ` AND (
+          COALESCE(p.student_name, p.parent_name) ILIKE $${paramIndex}
+          OR COALESCE(p.guardian_name, p.parent_name) ILIKE $${paramIndex}
+          OR COALESCE(p.guardian_phone_number, p.phone_number) ILIKE $${paramIndex}
+        )`;
         params.push(`%${search}%`);
         paramIndex++;
       }
@@ -60,14 +68,19 @@ router.get('/', authenticateToken, async (req, res) => {
           COALESCE(SUM(pmf.outstanding_after_payment), 0) as total_outstanding,
           MAX(CASE WHEN bm.is_active = true THEN pmf.status END) as current_month_status
         FROM parents p
-        LEFT JOIN parent_month_fee pmf ON pmf.parent_id = p.id
-        LEFT JOIN billing_months bm ON pmf.billing_month_id = bm.id
+        LEFT JOIN parent_month_fee pmf ON pmf.parent_id = p.id AND pmf.school_id = $1
+        LEFT JOIN billing_months bm ON pmf.billing_month_id = bm.id AND bm.school_id = $1
       `;
 
       const conditions = [];
+      conditions.push(`p.school_id = $1`);
 
       if (search) {
-        conditions.push(`(p.parent_name ILIKE $${paramIndex} OR p.phone_number ILIKE $${paramIndex})`);
+        conditions.push(`(
+          COALESCE(p.student_name, p.parent_name) ILIKE $${paramIndex}
+          OR COALESCE(p.guardian_name, p.parent_name) ILIKE $${paramIndex}
+          OR COALESCE(p.guardian_phone_number, p.phone_number) ILIKE $${paramIndex}
+        )`);
         params.push(`%${search}%`);
         paramIndex++;
       }
@@ -82,7 +95,7 @@ router.get('/', authenticateToken, async (req, res) => {
         query += ` WHERE ${conditions.join(' AND ')}`;
       }
 
-      query += ` GROUP BY p.id, p.parent_name, p.phone_number, p.number_of_children, p.monthly_fee_amount, p.created_at, p.updated_at`;
+      query += ` GROUP BY p.id`;
 
       if (status === 'outstanding') {
         query += ` HAVING COALESCE(SUM(pmf.outstanding_after_payment), 0) > 0`;
@@ -100,40 +113,47 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Get total count (simplified for now)
     const countQuery = search
-      ? 'SELECT COUNT(*) FROM parents WHERE parent_name ILIKE $1 OR phone_number ILIKE $1'
-      : 'SELECT COUNT(*) FROM parents';
-    const countParams = search ? [`%${search}%`] : [];
+      ? `SELECT COUNT(*) FROM parents WHERE school_id = $1 AND (
+          COALESCE(student_name, parent_name) ILIKE $2
+          OR COALESCE(guardian_name, parent_name) ILIKE $2
+          OR COALESCE(guardian_phone_number, phone_number) ILIKE $2
+        )`
+      : 'SELECT COUNT(*) FROM parents WHERE school_id = $1';
+    const countParams = search ? [schoolId, `%${search}%`] : [schoolId];
     const countResult = await pool.query(countQuery, countParams);
 
     res.json({
-      parents: result.rows,
+      students: result.rows,
+      parents: result.rows, // backward compatible
       total: parseInt(countResult.rows[0].count),
       page: parseInt(page),
       limit: parseInt(limit)
     });
   } catch (error) {
-    console.error('Get parents error:', error);
+    console.error('Get students error:', error);
     console.error('Error details:', {
       message: error.message,
       stack: error.stack,
       query: req.query
     });
     res.status(500).json({ 
-      error: 'Failed to fetch parents',
+      error: 'Failed to fetch students',
       message: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
 
 // Export all parents to Excel
-router.get('/export', authenticateToken, async (req, res) => {
+router.get('/export', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { month_id, status, search } = req.query;
 
     // Build query to get filtered parents
     let parentsQuery;
     const params = [];
-    let paramIndex = 1;
+    const schoolId = req.user.school_id;
+    params.push(schoolId);
+    let paramIndex = 2;
 
     // If filtering by month_id, use a different approach
     if (month_id) {
@@ -143,13 +163,15 @@ router.get('/export', authenticateToken, async (req, res) => {
           COALESCE(
             (SELECT SUM(outstanding_after_payment) 
              FROM parent_month_fee 
-             WHERE parent_id = p.id), 
+             WHERE parent_id = p.id AND school_id = $1), 
             0
           ) as total_outstanding,
           pmf.status as current_month_status
         FROM parents p
         INNER JOIN parent_month_fee pmf ON pmf.parent_id = p.id
-        WHERE pmf.billing_month_id = $${paramIndex}
+        WHERE p.school_id = $1
+          AND pmf.school_id = $1
+          AND pmf.billing_month_id = $${paramIndex}
       `;
       params.push(parseInt(month_id));
       paramIndex++;
@@ -177,11 +199,12 @@ router.get('/export', authenticateToken, async (req, res) => {
           COALESCE(SUM(pmf.outstanding_after_payment), 0) as total_outstanding,
           MAX(CASE WHEN bm.is_active = true THEN pmf.status END) as current_month_status
         FROM parents p
-        LEFT JOIN parent_month_fee pmf ON pmf.parent_id = p.id
-        LEFT JOIN billing_months bm ON pmf.billing_month_id = bm.id
+        LEFT JOIN parent_month_fee pmf ON pmf.parent_id = p.id AND pmf.school_id = $1
+        LEFT JOIN billing_months bm ON pmf.billing_month_id = bm.id AND bm.school_id = $1
       `;
 
       const conditions = [];
+      conditions.push(`p.school_id = $1`);
 
       if (search) {
         conditions.push(`(p.parent_name ILIKE $${paramIndex} OR p.phone_number ILIKE $${paramIndex})`);
@@ -225,8 +248,9 @@ router.get('/export', authenticateToken, async (req, res) => {
         parent_id,
         COALESCE(SUM(outstanding_after_payment), 0) as total_outstanding
       FROM parent_month_fee
+      WHERE school_id = $1
       GROUP BY parent_id
-    `);
+    `, [schoolId]);
     const outstandingMap = {};
     outstandingQuery.rows.forEach(row => {
       outstandingMap[row.parent_id] = parseFloat(row.total_outstanding || 0);
@@ -241,8 +265,9 @@ router.get('/export', authenticateToken, async (req, res) => {
           pmf.status,
           pmf.outstanding_after_payment
         FROM parent_month_fee pmf
-        WHERE pmf.billing_month_id = $1
-      `, [parseInt(month_id)]);
+        WHERE pmf.school_id = $1
+          AND pmf.billing_month_id = $2
+      `, [schoolId, parseInt(month_id)]);
     } else {
       statusQuery = await pool.query(`
         SELECT 
@@ -251,8 +276,10 @@ router.get('/export', authenticateToken, async (req, res) => {
           pmf.outstanding_after_payment
         FROM parent_month_fee pmf
         JOIN billing_months bm ON pmf.billing_month_id = bm.id
-        WHERE bm.is_active = true
-      `);
+        WHERE pmf.school_id = $1
+          AND bm.school_id = $1
+          AND bm.is_active = true
+      `, [schoolId]);
     }
     const statusMap = {};
     statusQuery.rows.forEach(row => {
@@ -348,7 +375,7 @@ router.get('/export', authenticateToken, async (req, res) => {
 });
 
 // Download import template
-router.get('/import/template', authenticateToken, (req, res) => {
+router.get('/import/template', authenticateToken, requireSchoolContext, (req, res) => {
   try {
     // Create template data
     const templateData = [
@@ -395,7 +422,7 @@ router.get('/import/template', authenticateToken, (req, res) => {
 });
 
 // Import parents from Excel
-router.post('/import', authenticateToken, upload.single('file'), async (req, res) => {
+router.post('/import', authenticateToken, requireSchoolContext, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -408,6 +435,7 @@ router.post('/import', authenticateToken, upload.single('file'), async (req, res
 
     const imported = [];
     const errors = [];
+    const schoolId = req.user.school_id;
 
     for (const row of data) {
       try {
@@ -422,14 +450,14 @@ router.post('/import', authenticateToken, upload.single('file'), async (req, res
         }
 
         const result = await pool.query(
-          `INSERT INTO parents (parent_name, phone_number, number_of_children, monthly_fee_amount)
-           VALUES ($1, $2, $3, $4)
-           ON CONFLICT (phone_number) DO UPDATE
+          `INSERT INTO parents (school_id, parent_name, phone_number, number_of_children, monthly_fee_amount)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (school_id, phone_number) DO UPDATE
            SET parent_name = EXCLUDED.parent_name,
                number_of_children = EXCLUDED.number_of_children,
                monthly_fee_amount = EXCLUDED.monthly_fee_amount
            RETURNING *`,
-          [parent_name, phone_number, number_of_children, monthly_fee_amount]
+          [schoolId, parent_name, phone_number, number_of_children, monthly_fee_amount]
         );
 
         imported.push(result.rows[0]);
@@ -457,10 +485,10 @@ router.post('/import', authenticateToken, upload.single('file'), async (req, res
 });
 
 // Get single parent
-router.get('/:id', authenticateToken, async (req, res) => {
+router.get('/:id', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('SELECT * FROM parents WHERE id = $1', [id]);
+    const result = await pool.query('SELECT * FROM parents WHERE id = $1 AND school_id = $2', [id, req.user.school_id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Parent not found' });
@@ -474,18 +502,52 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Create parent
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
-    const { parent_name, phone_number, number_of_children, monthly_fee_amount } = req.body;
+    // Accept both legacy (parent_*) and new Students fields
+    const {
+      parent_name,
+      phone_number,
+      number_of_children,
+      monthly_fee_amount,
+      student_name,
+      guardian_name,
+      guardian_phone_number,
+      class_section
+    } = req.body;
 
-    if (!parent_name || !phone_number || !monthly_fee_amount) {
-      return res.status(400).json({ error: 'Parent name, phone number, and monthly fee are required' });
+    const resolvedStudentName = (student_name || parent_name || '').trim();
+    const resolvedGuardianName = (guardian_name || parent_name || '').trim();
+    const resolvedGuardianPhone = (guardian_phone_number || phone_number || '').trim();
+
+    if (!resolvedStudentName || !resolvedGuardianName || !resolvedGuardianPhone || !monthly_fee_amount) {
+      return res.status(400).json({ error: 'Student name, guardian name, guardian phone, and monthly fee are required' });
     }
 
     const result = await pool.query(
-      `INSERT INTO parents (parent_name, phone_number, number_of_children, monthly_fee_amount)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [parent_name, phone_number, number_of_children || 1, monthly_fee_amount]
+      `INSERT INTO parents (
+        school_id,
+        parent_name,
+        phone_number,
+        number_of_children,
+        monthly_fee_amount,
+        student_name,
+        guardian_name,
+        guardian_phone_number,
+        class_section
+      )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [
+        req.user.school_id,
+        resolvedGuardianName,
+        resolvedGuardianPhone,
+        number_of_children || 1,
+        monthly_fee_amount,
+        resolvedStudentName,
+        resolvedGuardianName,
+        resolvedGuardianPhone,
+        class_section || null
+      ]
     );
 
     // Emit real-time update via Socket.io
@@ -506,19 +568,47 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // Update parent
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { id } = req.params;
-    const { parent_name, phone_number, number_of_children, monthly_fee_amount } = req.body;
+    const {
+      parent_name,
+      phone_number,
+      number_of_children,
+      monthly_fee_amount,
+      student_name,
+      guardian_name,
+      guardian_phone_number,
+      class_section
+    } = req.body;
+
+    const resolvedStudentName = student_name || null;
+    const resolvedGuardianName = guardian_name || parent_name || null;
+    const resolvedGuardianPhone = guardian_phone_number || phone_number || null;
 
     const result = await pool.query(
       `UPDATE parents 
        SET parent_name = COALESCE($1, parent_name),
            phone_number = COALESCE($2, phone_number),
            number_of_children = COALESCE($3, number_of_children),
-           monthly_fee_amount = COALESCE($4, monthly_fee_amount)
-       WHERE id = $5 RETURNING *`,
-      [parent_name, phone_number, number_of_children, monthly_fee_amount, id]
+           monthly_fee_amount = COALESCE($4, monthly_fee_amount),
+           student_name = COALESCE($5, student_name),
+           guardian_name = COALESCE($6, guardian_name),
+           guardian_phone_number = COALESCE($7, guardian_phone_number),
+           class_section = COALESCE($8, class_section)
+       WHERE id = $9 AND school_id = $10 RETURNING *`,
+      [
+        resolvedGuardianName,
+        resolvedGuardianPhone,
+        number_of_children,
+        monthly_fee_amount,
+        resolvedStudentName,
+        resolvedGuardianName,
+        resolvedGuardianPhone,
+        class_section,
+        id,
+        req.user.school_id
+      ]
     );
 
     if (result.rows.length === 0) {
@@ -540,18 +630,18 @@ router.put('/:id', authenticateToken, async (req, res) => {
 });
 
 // Delete parent
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { id } = req.params;
 
     // Check if parent exists
-    const parentResult = await pool.query('SELECT * FROM parents WHERE id = $1', [id]);
+    const parentResult = await pool.query('SELECT * FROM parents WHERE id = $1 AND school_id = $2', [id, req.user.school_id]);
     if (parentResult.rows.length === 0) {
       return res.status(404).json({ error: 'Parent not found' });
     }
 
     // Delete parent (cascade will handle related records)
-    await pool.query('DELETE FROM parents WHERE id = $1', [id]);
+    await pool.query('DELETE FROM parents WHERE id = $1 AND school_id = $2', [id, req.user.school_id]);
 
     // Emit real-time update via Socket.io
     const io = req.app.get('io');
@@ -568,10 +658,11 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 });
 
 // Get parent fee history
-router.get('/:id/history', authenticateToken, async (req, res) => {
+router.get('/:id/history', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { id } = req.params;
     const { limit = 100 } = req.query;
+    const schoolId = req.user.school_id;
 
     const result = await pool.query(
       `SELECT 
@@ -583,13 +674,13 @@ router.get('/:id/history', authenticateToken, async (req, res) => {
         pi.amount as item_amount,
         pi.months_covered
       FROM payments p
-      JOIN billing_months bm ON p.billing_month_id = bm.id
+      JOIN billing_months bm ON p.billing_month_id = bm.id AND bm.school_id = $2
       JOIN users u ON p.collected_by = u.id
       LEFT JOIN payment_items pi ON pi.payment_id = p.id
-      WHERE p.parent_id = $1
+      WHERE p.parent_id = $1 AND p.school_id = $2
       ORDER BY p.payment_date DESC
-      LIMIT $2`,
-      [id, limit]
+      LIMIT $3`,
+      [id, schoolId, limit]
     );
 
     res.json(result.rows);
@@ -600,12 +691,13 @@ router.get('/:id/history', authenticateToken, async (req, res) => {
 });
 
 // Get parent profile with monthly fee timeline
-router.get('/:id/profile', authenticateToken, async (req, res) => {
+router.get('/:id/profile', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { id } = req.params;
+    const schoolId = req.user.school_id;
 
     // Get parent info
-    const parentResult = await pool.query('SELECT * FROM parents WHERE id = $1', [id]);
+    const parentResult = await pool.query('SELECT * FROM parents WHERE id = $1 AND school_id = $2', [id, schoolId]);
     if (parentResult.rows.length === 0) {
       return res.status(404).json({ error: 'Parent not found' });
     }
@@ -622,20 +714,21 @@ router.get('/:id/profile', authenticateToken, async (req, res) => {
     // Get all billing months from parent registration to 2 years in future (for advance payments)
     const monthsResult = await pool.query(
       `SELECT * FROM billing_months 
-       WHERE (year > $1 OR (year = $1 AND month >= $2))
+       WHERE school_id = $5
+         AND (year > $1 OR (year = $1 AND month >= $2))
          AND (year <= $3 OR (year = $3 AND month <= $4))
        ORDER BY year ASC, month ASC`,
-      [parentYear, parentMonth, currentYear + 2, 12]
+      [parentYear, parentMonth, currentYear + 2, 12, schoolId]
     );
 
     // Get all parent_month_fee records
     const feeResult = await pool.query(
       `SELECT pmf.*, bm.year, bm.month, bm.is_active
        FROM parent_month_fee pmf
-       JOIN billing_months bm ON pmf.billing_month_id = bm.id
-       WHERE pmf.parent_id = $1
+       JOIN billing_months bm ON pmf.billing_month_id = bm.id AND bm.school_id = $2
+       WHERE pmf.parent_id = $1 AND pmf.school_id = $2
        ORDER BY bm.year ASC, bm.month ASC`,
-      [id]
+      [id, schoolId]
     );
 
     // Create a map of month fees
@@ -656,12 +749,12 @@ router.get('/:id/profile', authenticateToken, async (req, res) => {
         pi.amount as item_amount,
         pi.months_covered
       FROM payments p
-      JOIN billing_months bm ON p.billing_month_id = bm.id
+      JOIN billing_months bm ON p.billing_month_id = bm.id AND bm.school_id = $2
       JOIN users u ON p.collected_by = u.id
       LEFT JOIN payment_items pi ON pi.payment_id = p.id
-      WHERE p.parent_id = $1
+      WHERE p.parent_id = $1 AND p.school_id = $2
       ORDER BY p.payment_date ASC`,
-      [id]
+      [id, schoolId]
     );
 
     // Group payments by month
@@ -736,7 +829,8 @@ router.get('/:id/profile', authenticateToken, async (req, res) => {
     });
 
     res.json({
-      parent,
+      student: parent,
+      parent, // backward compatible
       timeline
     });
   } catch (error) {

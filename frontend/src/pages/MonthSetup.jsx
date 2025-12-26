@@ -191,7 +191,7 @@ export default function MonthSetup() {
 
         <div className="space-y-4 sm:space-y-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="form-label">
               Enter Year
             </label>
             <input
@@ -214,7 +214,7 @@ export default function MonthSetup() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="form-label">
               Select Month
             </label>
             <select
@@ -394,7 +394,7 @@ export default function MonthSetup() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="form-label">
                   Question 1: Type the month name to confirm ({monthNames[deletingMonth.month - 1]} {deletingMonth.year})
                 </label>
                 <input
@@ -407,7 +407,7 @@ export default function MonthSetup() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="form-label">
                   Question 2: Type "DELETE" to confirm deletion
                 </label>
                 <input
@@ -420,7 +420,7 @@ export default function MonthSetup() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="form-label">
                   Question 3: Type "YES" if you understand this cannot be undone
                 </label>
                 <input

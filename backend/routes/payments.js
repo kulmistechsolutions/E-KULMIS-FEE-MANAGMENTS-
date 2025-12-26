@@ -1,20 +1,22 @@
 import express from 'express';
 import pool from '../database/db.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireSchoolContext } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // Create payment
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requireSchoolContext, async (req, res) => {
   const client = await pool.connect();
   
   try {
     await client.query('BEGIN');
 
-    const { parent_id, billing_month_id, amount, payment_type, months_advance, notes } = req.body;
+    const schoolId = req.user.school_id;
+    const { parent_id, student_id, billing_month_id, amount, payment_type, months_advance, notes } = req.body;
+    const resolvedParentId = student_id || parent_id;
     const collected_by = req.user.id;
 
-    if (!parent_id || !billing_month_id || !amount || amount <= 0) {
+    if (!resolvedParentId || !billing_month_id || !amount || amount <= 0) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Invalid payment data' });
     }
@@ -25,15 +27,18 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Months in advance is required for advance payments' });
     }
 
+    const schoolResult = await client.query('SELECT id, name FROM schools WHERE id = $1', [schoolId]);
+    const schoolName = schoolResult.rows[0]?.name || 'FEE-KULMIS';
+
     // Get parent and month info
-    const parentResult = await client.query('SELECT * FROM parents WHERE id = $1', [parent_id]);
+    const parentResult = await client.query('SELECT * FROM parents WHERE id = $1 AND school_id = $2', [resolvedParentId, schoolId]);
     if (parentResult.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Parent not found' });
     }
 
     const parent = parentResult.rows[0];
-    const monthResult = await client.query('SELECT * FROM billing_months WHERE id = $1', [billing_month_id]);
+    const monthResult = await client.query('SELECT * FROM billing_months WHERE id = $1 AND school_id = $2', [billing_month_id, schoolId]);
     if (monthResult.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Month not found' });
@@ -45,8 +50,8 @@ router.post('/', authenticateToken, async (req, res) => {
     
     if (payment_type !== 'advance') {
       feeResult = await client.query(
-        'SELECT * FROM parent_month_fee WHERE parent_id = $1 AND billing_month_id = $2',
-        [parent_id, billing_month_id]
+        'SELECT * FROM parent_month_fee WHERE parent_id = $1 AND billing_month_id = $2 AND school_id = $3',
+        [resolvedParentId, billing_month_id, schoolId]
       );
 
       if (feeResult.rows.length === 0) {
@@ -88,16 +93,16 @@ router.post('/', authenticateToken, async (req, res) => {
     } else {
       // For advance payments, get or create fee record for current month if needed
       feeResult = await client.query(
-        'SELECT * FROM parent_month_fee WHERE parent_id = $1 AND billing_month_id = $2',
-        [parent_id, billing_month_id]
+        'SELECT * FROM parent_month_fee WHERE parent_id = $1 AND billing_month_id = $2 AND school_id = $3',
+        [resolvedParentId, billing_month_id, schoolId]
       );
 
       if (feeResult.rows.length === 0) {
         // Create a fee record for advance payment tracking
         const insertResult = await client.query(
-          `INSERT INTO parent_month_fee (parent_id, billing_month_id, monthly_fee, carried_forward_amount, total_due_this_month, amount_paid_this_month, outstanding_after_payment, status)
-           VALUES ($1, $2, $3, 0, $3, 0, $3, 'unpaid') RETURNING *`,
-          [parent_id, billing_month_id, parent.monthly_fee_amount]
+          `INSERT INTO parent_month_fee (school_id, parent_id, billing_month_id, monthly_fee, carried_forward_amount, total_due_this_month, amount_paid_this_month, outstanding_after_payment, status)
+           VALUES ($1, $2, $3, $4, 0, $4, 0, $4, 'unpaid') RETURNING *`,
+          [schoolId, resolvedParentId, billing_month_id, parent.monthly_fee_amount]
         );
         fee = insertResult.rows[0];
       } else {
@@ -141,9 +146,9 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Create payment record
     const paymentResult = await client.query(
-      `INSERT INTO payments (parent_id, billing_month_id, amount, payment_type, collected_by, notes)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [parent_id, billing_month_id, amount, paymentType, collected_by, notes]
+      `INSERT INTO payments (school_id, parent_id, billing_month_id, amount, payment_type, collected_by, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [schoolId, resolvedParentId, billing_month_id, amount, paymentType, collected_by, notes]
     );
 
     const payment = paymentResult.rows[0];
@@ -152,15 +157,15 @@ router.post('/', authenticateToken, async (req, res) => {
     if (payment_type === 'advance') {
       // Create payment item for advance payment
       await client.query(
-        `INSERT INTO payment_items (payment_id, item_type, amount, months_covered)
-         VALUES ($1, 'advance', $2, $3)`,
-        [payment.id, amount, months_advance]
+        `INSERT INTO payment_items (school_id, payment_id, item_type, amount, months_covered)
+         VALUES ($1, $2, 'advance', $3, $4)`,
+        [schoolId, payment.id, amount, months_advance]
       );
       
       // Create or update advance payment record (AFTER payment is created so we have payment_id)
       const existingAdvance = await client.query(
-        'SELECT * FROM advance_payments WHERE parent_id = $1 ORDER BY id DESC LIMIT 1',
-        [parent_id]
+        'SELECT * FROM advance_payments WHERE parent_id = $1 AND school_id = $2 ORDER BY id DESC LIMIT 1',
+        [resolvedParentId, schoolId]
       );
 
       if (existingAdvance.rows.length > 0) {
@@ -171,15 +176,15 @@ router.post('/', authenticateToken, async (req, res) => {
                months_remaining = months_remaining + $1,
                amount_per_month = $2,
                payment_id = $3
-           WHERE parent_id = $4 AND id = $5`,
-          [months_advance, parent.monthly_fee_amount, payment.id, parent_id, existingAdvance.rows[0].id]
+           WHERE parent_id = $4 AND school_id = $5 AND id = $6`,
+          [months_advance, parent.monthly_fee_amount, payment.id, resolvedParentId, schoolId, existingAdvance.rows[0].id]
         );
       } else {
         // Create new advance payment record with payment_id
         await client.query(
-          `INSERT INTO advance_payments (parent_id, payment_id, months_paid, months_remaining, amount_per_month)
-           VALUES ($1, $2, $3, $3, $4)`,
-          [parent_id, payment.id, months_advance, parent.monthly_fee_amount]
+          `INSERT INTO advance_payments (school_id, parent_id, payment_id, months_paid, months_remaining, amount_per_month)
+           VALUES ($1, $2, $3, $4, $4, $5)`,
+          [schoolId, resolvedParentId, payment.id, months_advance, parent.monthly_fee_amount]
         );
       }
     } else {
@@ -191,17 +196,17 @@ router.post('/', authenticateToken, async (req, res) => {
 
       if (monthlyFeeAmount > 0) {
         await client.query(
-          `INSERT INTO payment_items (payment_id, item_type, amount)
-           VALUES ($1, 'monthly_fee', $2)`,
-          [payment.id, monthlyFeeAmount]
+          `INSERT INTO payment_items (school_id, payment_id, item_type, amount)
+           VALUES ($1, $2, 'monthly_fee', $3)`,
+          [schoolId, payment.id, monthlyFeeAmount]
         );
       }
 
       if (carriedForwardAmount > 0) {
         await client.query(
-          `INSERT INTO payment_items (payment_id, item_type, amount)
-           VALUES ($1, 'carried_forward', $2)`,
-          [payment.id, carriedForwardAmount]
+          `INSERT INTO payment_items (school_id, payment_id, item_type, amount)
+           VALUES ($1, $2, 'carried_forward', $3)`,
+          [schoolId, payment.id, carriedForwardAmount]
         );
       }
     }
@@ -214,8 +219,8 @@ router.post('/', authenticateToken, async (req, res) => {
           `UPDATE parent_month_fee
            SET status = $1,
                advance_months_remaining = $2
-           WHERE parent_id = $3 AND billing_month_id = $4`,
-          [newStatus, advanceMonths, parent_id, billing_month_id]
+           WHERE parent_id = $3 AND billing_month_id = $4 AND school_id = $5`,
+          [newStatus, advanceMonths, resolvedParentId, billing_month_id, schoolId]
         );
       } else {
         // For normal/partial payments, update all fields
@@ -225,8 +230,8 @@ router.post('/', authenticateToken, async (req, res) => {
                outstanding_after_payment = $2,
                status = $3,
                advance_months_remaining = CASE WHEN $4 > 0 THEN $4 ELSE advance_months_remaining END
-           WHERE parent_id = $5 AND billing_month_id = $6`,
-          [newPaid, newOutstanding, newStatus, advanceMonths, parent_id, billing_month_id]
+           WHERE parent_id = $5 AND billing_month_id = $6 AND school_id = $7`,
+          [newPaid, newOutstanding, newStatus, advanceMonths, resolvedParentId, billing_month_id, schoolId]
         );
       }
     }
@@ -234,9 +239,9 @@ router.post('/', authenticateToken, async (req, res) => {
     // Generate SMS text
     let smsText = '';
     if (payment_type === 'advance') {
-      smsText = `Dear ${parent.parent_name}, you have made an advance payment of ${amount} for ${months_advance} month(s) at Rowdatul Iimaan School. Thank you.`;
+      smsText = `Dear ${parent.parent_name}, you have made an advance payment of ${amount} for ${months_advance} month(s) at ${schoolName}. Thank you.`;
     } else {
-      smsText = `Dear ${parent.parent_name}, you have paid ${amount} for ${monthResult.rows[0].month}/${monthResult.rows[0].year} at Rowdatul Iimaan School. Remaining balance: ${remainingBalance}. Thank you.`;
+      smsText = `Dear ${parent.parent_name}, you have paid ${amount} for ${monthResult.rows[0].month}/${monthResult.rows[0].year} at ${schoolName}. Remaining balance: ${remainingBalance}. Thank you.`;
     }
 
     // Update payment with SMS text
@@ -249,8 +254,8 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Fetch updated payment with SMS
     const updatedPayment = await client.query(
-      'SELECT * FROM payments WHERE id = $1',
-      [payment.id]
+      'SELECT * FROM payments WHERE id = $1 AND school_id = $2',
+      [payment.id, schoolId]
     );
 
     // Emit real-time update via Socket.io
@@ -258,10 +263,10 @@ router.post('/', authenticateToken, async (req, res) => {
     if (io) {
       io.emit('payment:created', {
         payment: updatedPayment.rows[0],
-        parent_id: parent_id,
+        parent_id: resolvedParentId,
         billing_month_id: billing_month_id
       });
-      io.emit('parent:updated', { parent_id: parent_id });
+      io.emit('parent:updated', { parent_id: resolvedParentId });
       io.emit('month:updated', { billing_month_id: billing_month_id });
       io.emit('reports:updated');
     }
@@ -290,15 +295,18 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // Get payment receipt
-router.get('/:id/receipt', authenticateToken, async (req, res) => {
+router.get('/:id/receipt', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { id } = req.params;
+    const schoolId = req.user.school_id;
 
     const result = await pool.query(
       `SELECT 
         p.*,
-        pr.parent_name,
-        pr.phone_number,
+        COALESCE(pr.student_name, pr.parent_name) as student_name,
+        COALESCE(pr.guardian_name, pr.parent_name) as guardian_name,
+        COALESCE(pr.guardian_phone_number, pr.phone_number) as guardian_phone_number,
+        pr.class_section,
         pr.number_of_children,
         bm.year,
         bm.month,
@@ -311,8 +319,8 @@ router.get('/:id/receipt', authenticateToken, async (req, res) => {
       JOIN billing_months bm ON p.billing_month_id = bm.id
       JOIN users u ON p.collected_by = u.id
       LEFT JOIN payment_items pi ON pi.payment_id = p.id
-      WHERE p.id = $1`,
-      [id]
+      WHERE p.id = $1 AND p.school_id = $2 AND pr.school_id = $2 AND bm.school_id = $2`,
+      [id, schoolId]
     );
 
     if (result.rows.length === 0) {

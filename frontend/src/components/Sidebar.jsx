@@ -13,26 +13,30 @@ import {
   AcademicCapIcon,
   BanknotesIcon,
   DocumentTextIcon,
-  PresentationChartLineIcon
+  PresentationChartLineIcon,
+  Cog6ToothIcon
 } from '@heroicons/react/24/outline'
 
 // All navigation items with role requirements
 const allNavigation = [
-  { name: 'Dashboard', href: '/', icon: HomeIcon, roles: ['admin'] },
-  { name: 'Parents', href: '/parents', icon: UsersIcon, roles: ['admin', 'cashier'] },
-  { name: 'Collect Fee', href: '/collect-fee', icon: CurrencyDollarIcon, roles: ['admin', 'cashier'] },
-  { name: 'Teachers', href: '/teachers', icon: AcademicCapIcon, roles: ['admin'] },
-  { name: 'Pay Teacher Salary', href: '/pay-teacher-salary', icon: BanknotesIcon, roles: ['admin'] },
-  { name: 'Expenses', href: '/expenses', icon: DocumentTextIcon, roles: ['admin'] },
-  { name: 'Month Setup', href: '/month-setup', icon: CalendarIcon, roles: ['admin'] },
-  { name: 'Reports', href: '/reports', icon: ChartBarIcon, roles: ['admin'] },
-  { name: 'Users', href: '/users', icon: UserGroupIcon, roles: ['admin'] },
-  { name: 'User Monitoring', href: '/user-monitoring', icon: PresentationChartLineIcon, roles: ['admin'] },
+  { name: 'Schools', href: '/platform/schools', icon: HomeIcon, roles: ['super_admin'] },
+
+  { name: 'Dashboard', href: '/', icon: HomeIcon, roles: ['admin', 'school_admin'] },
+  { name: 'Students', href: '/students', icon: UsersIcon, roles: ['admin', 'school_admin', 'cashier'] },
+  { name: 'Collect Fee', href: '/collect-fee', icon: CurrencyDollarIcon, roles: ['admin', 'school_admin', 'cashier'] },
+  { name: 'Teachers', href: '/teachers', icon: AcademicCapIcon, roles: ['admin', 'school_admin'] },
+  { name: 'Pay Teacher Salary', href: '/pay-teacher-salary', icon: BanknotesIcon, roles: ['admin', 'school_admin'] },
+  { name: 'Expenses', href: '/expenses', icon: DocumentTextIcon, roles: ['admin', 'school_admin'] },
+  { name: 'Month Setup', href: '/month-setup', icon: CalendarIcon, roles: ['admin', 'school_admin'] },
+  { name: 'Reports', href: '/reports', icon: ChartBarIcon, roles: ['admin', 'school_admin'] },
+  { name: 'Users', href: '/users', icon: UserGroupIcon, roles: ['admin', 'school_admin'] },
+  { name: 'User Monitoring', href: '/user-monitoring', icon: PresentationChartLineIcon, roles: ['admin', 'school_admin'] },
+  { name: 'School Branding', href: '/school-branding', icon: Cog6ToothIcon, roles: ['admin', 'school_admin'] },
 ]
 
 export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapse }) {
   const location = useLocation()
-  const { user } = useAuth()
+  const { user, branding } = useAuth()
   
   // Filter navigation based on user role
   const navigation = allNavigation.filter(item => 
@@ -64,15 +68,23 @@ export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapse }
           }`}>
             {!collapsed && (
               <div className="flex items-center flex-shrink-0">
-                <img src="/logo.jpeg" alt="Rowdatul Iimaan" className="h-10 w-10 rounded-full object-cover" />
+                <img
+                  src={branding?.school?.logo_path || '/systemlogo.png'}
+                  alt={branding?.school?.name || 'School Logo'}
+                  className="h-10 w-10 rounded-full object-cover"
+                />
                 <div className="ml-3">
-                  <h1 className="text-base font-bold text-gray-900 leading-tight">Rowdatul Iimaan</h1>
-                  <p className="text-xs text-gray-500">Fee Management</p>
+                  <h1 className="text-base font-bold text-gray-900 leading-tight">{branding?.system_name || 'FEE-KULMIS'}</h1>
+                  <p className="text-xs text-gray-500">{branding?.school?.name || 'School'}</p>
                 </div>
               </div>
             )}
             {collapsed && (
-              <img src="/logo.jpeg" alt="Logo" className="h-10 w-10 rounded-full object-cover mx-auto" />
+              <img
+                src={branding?.school?.logo_path || '/systemlogo.png'}
+                alt="Logo"
+                className="h-10 w-10 rounded-full object-cover mx-auto"
+              />
             )}
             <div className="flex items-center">
               <button
@@ -135,7 +147,7 @@ export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapse }
           {!collapsed && (
             <div className="px-4 py-4 border-t border-gray-200">
               <p className="text-xs text-gray-500 text-center">
-                © 2024 Rowdatul Iimaan
+                © 2024 {branding?.system_name || 'FEE-KULMIS'}
               </p>
             </div>
           )}

@@ -1,14 +1,16 @@
 import express from 'express';
 import pool from '../database/db.js';
-import { authenticateToken, requireAdmin } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin, requireSchoolContext } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // Get all billing months
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
+    const schoolId = req.user.school_id;
     const result = await pool.query(
-      'SELECT * FROM billing_months ORDER BY year DESC, month DESC'
+      'SELECT * FROM billing_months WHERE school_id = $1 ORDER BY year DESC, month DESC',
+      [schoolId]
     );
     res.json(result.rows);
   } catch (error) {
@@ -18,10 +20,12 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // Get active month
-router.get('/active', authenticateToken, async (req, res) => {
+router.get('/active', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
+    const schoolId = req.user.school_id;
     const result = await pool.query(
-      'SELECT * FROM billing_months WHERE is_active = true ORDER BY year DESC, month DESC LIMIT 1'
+      'SELECT * FROM billing_months WHERE school_id = $1 AND is_active = true ORDER BY year DESC, month DESC LIMIT 1',
+      [schoolId]
     );
     
     if (result.rows.length === 0) {
@@ -36,13 +40,14 @@ router.get('/active', authenticateToken, async (req, res) => {
 });
 
 // Create new billing month (Month Setup) - Admin only
-router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
+router.post('/setup', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   const client = await pool.connect();
   
   try {
     await client.query('BEGIN');
 
     const { year, month } = req.body;
+    const schoolId = req.user.school_id;
 
     if (!year || !month) {
       return res.status(400).json({ error: 'Year and month are required' });
@@ -50,8 +55,8 @@ router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
 
     // Check if month already exists
     const existingCheck = await client.query(
-      'SELECT id FROM billing_months WHERE year = $1 AND month = $2',
-      [year, month]
+      'SELECT id FROM billing_months WHERE school_id = $1 AND year = $2 AND month = $3',
+      [schoolId, year, month]
     );
 
     if (existingCheck.rows.length > 0) {
@@ -60,26 +65,30 @@ router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
     }
 
     // Deactivate all other months FIRST (before creating new one)
-    const deactivateResult = await client.query('UPDATE billing_months SET is_active = false WHERE is_active = true RETURNING id');
+    const deactivateResult = await client.query(
+      'UPDATE billing_months SET is_active = false WHERE school_id = $1 AND is_active = true RETURNING id',
+      [schoolId]
+    );
     console.log(`Deactivated ${deactivateResult.rows.length} previous active month(s)`);
 
     // Create new billing month
     const monthResult = await client.query(
-      'INSERT INTO billing_months (year, month, is_active) VALUES ($1, $2, true) RETURNING *',
-      [year, month]
+      'INSERT INTO billing_months (school_id, year, month, is_active) VALUES ($1, $2, $3, true) RETURNING *',
+      [schoolId, year, month]
     );
 
     const newMonth = monthResult.rows[0];
 
     // Get all parents
-    const parentsResult = await client.query('SELECT * FROM parents');
+    const parentsResult = await client.query('SELECT * FROM parents WHERE school_id = $1', [schoolId]);
 
     // Get previous month's data
     const prevMonthResult = await client.query(
       `SELECT * FROM billing_months 
-       WHERE (year < $1 OR (year = $1 AND month < $2))
+       WHERE school_id = $3
+         AND (year < $1 OR (year = $1 AND month < $2))
        ORDER BY year DESC, month DESC LIMIT 1`,
-      [year, month]
+      [year, month, schoolId]
     );
 
     // OPTIMIZATION: Batch fetch all previous month fees at once
@@ -87,8 +96,8 @@ router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
     if (prevMonthResult.rows.length > 0) {
       const prevMonthId = prevMonthResult.rows[0].id;
       const prevMonthFees = await client.query(
-        'SELECT parent_id, outstanding_after_payment, advance_months_remaining FROM parent_month_fee WHERE billing_month_id = $1',
-        [prevMonthId]
+        'SELECT parent_id, outstanding_after_payment, advance_months_remaining FROM parent_month_fee WHERE school_id = $1 AND billing_month_id = $2',
+        [schoolId, prevMonthId]
       );
       prevMonthFees.rows.forEach(fee => {
         prevMonthFeesMap[fee.parent_id] = fee;
@@ -98,8 +107,8 @@ router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
     // OPTIMIZATION: Batch fetch all advance payments at once
     const parentIds = parentsResult.rows.map(p => p.id);
     const allAdvancePayments = await client.query(
-      'SELECT parent_id, months_remaining, amount_per_month, id FROM advance_payments WHERE parent_id = ANY($1) AND months_remaining > 0 ORDER BY parent_id, created_at ASC',
-      [parentIds]
+      'SELECT parent_id, months_remaining, amount_per_month, id FROM advance_payments WHERE school_id = $1 AND parent_id = ANY($2) AND months_remaining > 0 ORDER BY parent_id, created_at ASC',
+      [schoolId, parentIds]
     );
     const advancePaymentsMap = {};
     allAdvancePayments.rows.forEach(advance => {
@@ -141,6 +150,7 @@ router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
 
       // Prepare insert values for batch insert
       feeInsertValues.push([
+        schoolId,
         parent.id,
         newMonth.id,
         parent.monthly_fee_amount,
@@ -156,22 +166,22 @@ router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
     // Batch update advance payments (only if any need updating)
     if (advanceUpdateIds.length > 0) {
       await client.query(
-        'UPDATE advance_payments SET months_remaining = months_remaining - 1 WHERE id = ANY($1)',
-        [advanceUpdateIds]
+        'UPDATE advance_payments SET months_remaining = months_remaining - 1 WHERE school_id = $1 AND id = ANY($2)',
+        [schoolId, advanceUpdateIds]
       );
     }
 
     // Batch insert all parent_month_fee records (using VALUES for better compatibility)
     if (feeInsertValues.length > 0) {
       const values = feeInsertValues.map((v, idx) => 
-        `($${idx * 9 + 1}, $${idx * 9 + 2}, $${idx * 9 + 3}, $${idx * 9 + 4}, $${idx * 9 + 5}, $${idx * 9 + 6}, $${idx * 9 + 7}, $${idx * 9 + 8}, $${idx * 9 + 9})`
+        `($${idx * 10 + 1}, $${idx * 10 + 2}, $${idx * 10 + 3}, $${idx * 10 + 4}, $${idx * 10 + 5}, $${idx * 10 + 6}, $${idx * 10 + 7}, $${idx * 10 + 8}, $${idx * 10 + 9}, $${idx * 10 + 10})`
       ).join(', ');
       
       const params = feeInsertValues.flat();
       
       await client.query(
         `INSERT INTO parent_month_fee 
-         (parent_id, billing_month_id, monthly_fee, carried_forward_amount, total_due_this_month, 
+         (school_id, parent_id, billing_month_id, monthly_fee, carried_forward_amount, total_due_this_month, 
           amount_paid_this_month, outstanding_after_payment, status, advance_months_remaining)
          VALUES ${values}`,
         params
@@ -180,7 +190,7 @@ router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
 
     // ========== TEACHER SALARY AUTO-GENERATION ==========
     // Get all active teachers
-    const teachersResult = await client.query('SELECT * FROM teachers WHERE is_active = true');
+    const teachersResult = await client.query('SELECT * FROM teachers WHERE school_id = $1 AND is_active = true', [schoolId]);
 
     if (teachersResult.rows.length > 0) {
       // Get previous month's teacher salary data
@@ -188,8 +198,8 @@ router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
       if (prevMonthResult.rows.length > 0) {
         const prevMonthId = prevMonthResult.rows[0].id;
         const prevMonthTeacherSalaries = await client.query(
-          'SELECT teacher_id, outstanding_after_payment, advance_months_remaining, amount_paid_this_month FROM teacher_salary_records WHERE billing_month_id = $1',
-          [prevMonthId]
+          'SELECT teacher_id, outstanding_after_payment, advance_months_remaining, amount_paid_this_month FROM teacher_salary_records WHERE school_id = $1 AND billing_month_id = $2',
+          [schoolId, prevMonthId]
         );
         prevMonthTeacherSalaries.rows.forEach(salary => {
           prevMonthTeacherSalariesMap[salary.teacher_id] = salary;
@@ -199,8 +209,8 @@ router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
       // Get all teacher advance payments
       const teacherIds = teachersResult.rows.map(t => t.id);
       const allTeacherAdvancePayments = await client.query(
-        'SELECT teacher_id, months_remaining, amount_per_month, id FROM teacher_advance_payments WHERE teacher_id = ANY($1) AND months_remaining > 0 ORDER BY teacher_id, created_at ASC',
-        [teacherIds]
+        'SELECT teacher_id, months_remaining, amount_per_month, id FROM teacher_advance_payments WHERE school_id = $1 AND teacher_id = ANY($2) AND months_remaining > 0 ORDER BY teacher_id, created_at ASC',
+        [schoolId, teacherIds]
       );
       const teacherAdvancePaymentsMap = {};
       allTeacherAdvancePayments.rows.forEach(advance => {
@@ -263,6 +273,7 @@ router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
 
         // Prepare insert values for batch insert
         teacherSalaryInsertValues.push([
+          schoolId,
           teacher.id,
           newMonth.id,
           teacher.monthly_salary,
@@ -278,22 +289,22 @@ router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
       // Batch update teacher advance payments (only if any need updating)
       if (teacherAdvanceUpdateIds.length > 0) {
         await client.query(
-          'UPDATE teacher_advance_payments SET months_remaining = months_remaining - 1 WHERE id = ANY($1)',
-          [teacherAdvanceUpdateIds]
+          'UPDATE teacher_advance_payments SET months_remaining = months_remaining - 1 WHERE school_id = $1 AND id = ANY($2)',
+          [schoolId, teacherAdvanceUpdateIds]
         );
       }
 
       // Batch insert all teacher_salary_records
       if (teacherSalaryInsertValues.length > 0) {
         const teacherValues = teacherSalaryInsertValues.map((v, idx) => 
-          `($${idx * 9 + 1}, $${idx * 9 + 2}, $${idx * 9 + 3}, $${idx * 9 + 4}, $${idx * 9 + 5}, $${idx * 9 + 6}, $${idx * 9 + 7}, $${idx * 9 + 8}, $${idx * 9 + 9})`
+          `($${idx * 10 + 1}, $${idx * 10 + 2}, $${idx * 10 + 3}, $${idx * 10 + 4}, $${idx * 10 + 5}, $${idx * 10 + 6}, $${idx * 10 + 7}, $${idx * 10 + 8}, $${idx * 10 + 9}, $${idx * 10 + 10})`
         ).join(', ');
         
         const teacherParams = teacherSalaryInsertValues.flat();
         
         await client.query(
           `INSERT INTO teacher_salary_records 
-           (teacher_id, billing_month_id, monthly_salary, advance_balance_used, total_due_this_month, 
+           (school_id, teacher_id, billing_month_id, monthly_salary, advance_balance_used, total_due_this_month, 
             amount_paid_this_month, outstanding_after_payment, status, advance_months_remaining)
            VALUES ${teacherValues}`,
           teacherParams
@@ -326,12 +337,13 @@ router.post('/setup', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // Get a single billing month by ID
-router.get('/:monthId', authenticateToken, async (req, res) => {
+router.get('/:monthId', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { monthId } = req.params;
+    const schoolId = req.user.school_id;
     const result = await pool.query(
-      'SELECT * FROM billing_months WHERE id = $1',
-      [monthId]
+      'SELECT * FROM billing_months WHERE id = $1 AND school_id = $2',
+      [monthId, schoolId]
     );
     
     if (result.rows.length === 0) {
@@ -346,18 +358,19 @@ router.get('/:monthId', authenticateToken, async (req, res) => {
 });
 
 // Delete a billing month (with cascade delete of related records)
-router.delete('/:monthId', authenticateToken, requireAdmin, async (req, res) => {
+router.delete('/:monthId', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   const client = await pool.connect();
   
   try {
     await client.query('BEGIN');
     
     const { monthId } = req.params;
+    const schoolId = req.user.school_id;
     
     // Check if month exists
     const monthCheck = await client.query(
-      'SELECT * FROM billing_months WHERE id = $1',
-      [monthId]
+      'SELECT * FROM billing_months WHERE id = $1 AND school_id = $2',
+      [monthId, schoolId]
     );
     
     if (monthCheck.rows.length === 0) {
@@ -377,8 +390,8 @@ router.delete('/:monthId', authenticateToken, requireAdmin, async (req, res) => 
     
     // Check if there are any payments for this month
     const paymentsCheck = await client.query(
-      'SELECT COUNT(*) as count FROM payments WHERE billing_month_id = $1',
-      [monthId]
+      'SELECT COUNT(*) as count FROM payments WHERE billing_month_id = $1 AND school_id = $2',
+      [monthId, schoolId]
     );
     
     const paymentCount = parseInt(paymentsCheck.rows[0].count);
@@ -390,8 +403,8 @@ router.delete('/:monthId', authenticateToken, requireAdmin, async (req, res) => 
     
     // Delete the month (cascade will handle related records)
     await client.query(
-      'DELETE FROM billing_months WHERE id = $1',
-      [monthId]
+      'DELETE FROM billing_months WHERE id = $1 AND school_id = $2',
+      [monthId, schoolId]
     );
     
     await client.query('COMMIT');
@@ -417,24 +430,27 @@ router.delete('/:monthId', authenticateToken, requireAdmin, async (req, res) => 
 });
 
 // Get fees for a specific month
-router.get('/:monthId/fees', authenticateToken, async (req, res) => {
+router.get('/:monthId/fees', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { monthId } = req.params;
     const { status, search } = req.query;
+    const schoolId = req.user.school_id;
 
     let query = `
       SELECT 
         pmf.*,
-        p.parent_name,
-        p.phone_number,
+        COALESCE(p.student_name, p.parent_name) as student_name,
+        COALESCE(p.guardian_name, p.parent_name) as guardian_name,
+        COALESCE(p.guardian_phone_number, p.phone_number) as guardian_phone_number,
+        p.class_section,
         p.number_of_children,
-        p.monthly_fee_amount as parent_monthly_fee
+        p.monthly_fee_amount as monthly_fee_amount
       FROM parent_month_fee pmf
       JOIN parents p ON pmf.parent_id = p.id
-      WHERE pmf.billing_month_id = $1
+      WHERE pmf.billing_month_id = $1 AND pmf.school_id = $2 AND p.school_id = $2
     `;
 
-    const params = [monthId];
+    const params = [monthId, schoolId];
 
     if (status && status !== 'all') {
       query += ` AND pmf.status = $${params.length + 1}`;

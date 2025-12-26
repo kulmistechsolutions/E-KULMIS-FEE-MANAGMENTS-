@@ -17,7 +17,14 @@ router.post('/login', async (req, res) => {
 
     // Find user by username or email
     const result = await pool.query(
-      'SELECT * FROM users WHERE (username = $1 OR email = $1) AND is_active = true',
+      `SELECT 
+        u.*,
+        s.name as school_name,
+        s.logo_path as school_logo_path,
+        s.is_active as school_is_active
+      FROM users u
+      LEFT JOIN schools s ON u.school_id = s.id
+      WHERE (u.username = $1 OR u.email = $1) AND u.is_active = true`,
       [username]
     );
 
@@ -27,6 +34,16 @@ router.post('/login', async (req, res) => {
 
     const user = result.rows[0];
 
+    // Block school users if school is inactive/deleted
+    if (user.role !== 'super_admin') {
+      if (!user.school_id) {
+        return res.status(403).json({ error: 'School account required' });
+      }
+      if (user.school_is_active === false) {
+        return res.status(403).json({ error: 'School is inactive. Please contact the platform admin.' });
+      }
+    }
+
     // Verify password
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
     if (!isValidPassword) {
@@ -35,7 +52,7 @@ router.post('/login', async (req, res) => {
 
     // Generate JWT token
     const token = jwt.sign(
-      { userId: user.id, username: user.username, role: user.role },
+      { userId: user.id, username: user.username, role: user.role, schoolId: user.school_id || null },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -46,7 +63,15 @@ router.post('/login', async (req, res) => {
         id: user.id,
         username: user.username,
         email: user.email,
-        role: user.role
+        role: user.role,
+        school_id: user.school_id || null,
+        school: user.school_id
+          ? {
+              id: user.school_id,
+              name: user.school_name,
+              logo_path: user.school_logo_path,
+            }
+          : null
       }
     });
   } catch (error) {
@@ -58,12 +83,18 @@ router.post('/login', async (req, res) => {
 // Get current user
 router.get('/me', authenticateToken, async (req, res) => {
   try {
+    const school = req.user.school_id
+      ? await pool.query('SELECT id, name, logo_path FROM schools WHERE id = $1', [req.user.school_id])
+      : null;
+
     res.json({
       user: {
         id: req.user.id,
         username: req.user.username,
         email: req.user.email,
-        role: req.user.role
+        role: req.user.role,
+        school_id: req.user.school_id || null,
+        school: school?.rows?.[0] || null
       }
     });
   } catch (error) {

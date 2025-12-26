@@ -2,19 +2,20 @@ import express from 'express';
 import multer from 'multer';
 import xlsx from 'xlsx';
 import pool from '../database/db.js';
-import { authenticateToken, requireAdmin } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin, requireSchoolContext } from '../middleware/auth.js';
 
 const router = express.Router();
 const upload = multer({ dest: 'uploads/' });
 
 // Get all teachers
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { search, department, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
 
-    let query = 'SELECT * FROM teachers WHERE 1=1';
-    const params = [];
+    const schoolId = req.user.school_id;
+    let query = 'SELECT * FROM teachers WHERE school_id = $1';
+    const params = [schoolId];
 
     if (search) {
       query += ` AND (teacher_name ILIKE $${params.length + 1} OR phone_number ILIKE $${params.length + 1})`;
@@ -32,8 +33,8 @@ router.get('/', authenticateToken, async (req, res) => {
     const result = await pool.query(query, params);
 
     // Get total count
-    let countQuery = 'SELECT COUNT(*) FROM teachers WHERE 1=1';
-    const countParams = [];
+    let countQuery = 'SELECT COUNT(*) FROM teachers WHERE school_id = $1';
+    const countParams = [schoolId];
     if (search) {
       countQuery += ` AND (teacher_name ILIKE $${countParams.length + 1} OR phone_number ILIKE $${countParams.length + 1})`;
       countParams.push(`%${search}%`);
@@ -57,7 +58,7 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // Download import template
-router.get('/import/template', authenticateToken, (req, res) => {
+router.get('/import/template', authenticateToken, requireSchoolContext, (req, res) => {
   try {
     // Create template data
     const templateData = [
@@ -107,7 +108,7 @@ router.get('/import/template', authenticateToken, (req, res) => {
 });
 
 // Import teachers from Excel
-router.post('/import', authenticateToken, requireAdmin, upload.single('file'), async (req, res) => {
+router.post('/import', authenticateToken, requireSchoolContext, requireAdmin, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -120,6 +121,7 @@ router.post('/import', authenticateToken, requireAdmin, upload.single('file'), a
 
     const imported = [];
     const errors = [];
+    const schoolId = req.user.school_id;
 
     for (const row of data) {
       try {
@@ -149,10 +151,10 @@ router.post('/import', authenticateToken, requireAdmin, upload.single('file'), a
         }
 
         const result = await pool.query(
-          `INSERT INTO teachers (teacher_name, department, monthly_salary, phone_number, date_of_joining)
-           VALUES ($1, $2, $3, $4, $5)
+          `INSERT INTO teachers (school_id, teacher_name, department, monthly_salary, phone_number, date_of_joining)
+           VALUES ($1, $2, $3, $4, $5, $6)
            RETURNING *`,
-          [teacher_name, department, monthly_salary, phone_number || null, date_of_joining]
+          [schoolId, teacher_name, department, monthly_salary, phone_number || null, date_of_joining]
         );
 
         imported.push(result.rows[0]);
@@ -180,10 +182,10 @@ router.post('/import', authenticateToken, requireAdmin, upload.single('file'), a
 });
 
 // Get single teacher
-router.get('/:id', authenticateToken, async (req, res) => {
+router.get('/:id', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('SELECT * FROM teachers WHERE id = $1', [id]);
+    const result = await pool.query('SELECT * FROM teachers WHERE id = $1 AND school_id = $2', [id, req.user.school_id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Teacher not found' });
@@ -197,18 +199,19 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Create teacher
-router.post('/', authenticateToken, requireAdmin, async (req, res) => {
+router.post('/', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { teacher_name, department, monthly_salary, phone_number, date_of_joining } = req.body;
+    const schoolId = req.user.school_id;
 
     if (!teacher_name || !department || !monthly_salary || !date_of_joining) {
       return res.status(400).json({ error: 'Teacher name, department, monthly salary, and date of joining are required' });
     }
 
     const result = await pool.query(
-      `INSERT INTO teachers (teacher_name, department, monthly_salary, phone_number, date_of_joining)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [teacher_name, department, monthly_salary, phone_number || null, date_of_joining]
+      `INSERT INTO teachers (school_id, teacher_name, department, monthly_salary, phone_number, date_of_joining)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [schoolId, teacher_name, department, monthly_salary, phone_number || null, date_of_joining]
     );
 
     // Emit real-time update via Socket.io
@@ -225,10 +228,11 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // Update teacher
-router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
+router.put('/:id', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { teacher_name, department, monthly_salary, phone_number, date_of_joining, is_active } = req.body;
+    const schoolId = req.user.school_id;
 
     const result = await pool.query(
       `UPDATE teachers 
@@ -238,8 +242,8 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
            phone_number = COALESCE($4, phone_number),
            date_of_joining = COALESCE($5, date_of_joining),
            is_active = COALESCE($6, is_active)
-       WHERE id = $7 RETURNING *`,
-      [teacher_name, department, monthly_salary, phone_number, date_of_joining, is_active, id]
+       WHERE id = $7 AND school_id = $8 RETURNING *`,
+      [teacher_name, department, monthly_salary, phone_number, date_of_joining, is_active, id, schoolId]
     );
 
     if (result.rows.length === 0) {
@@ -261,18 +265,19 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // Delete teacher
-router.delete('/:id', authenticateToken, requireAdmin, async (req, res) => {
+router.delete('/:id', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const schoolId = req.user.school_id;
 
     // Check if teacher exists
-    const teacherResult = await pool.query('SELECT * FROM teachers WHERE id = $1', [id]);
+    const teacherResult = await pool.query('SELECT * FROM teachers WHERE id = $1 AND school_id = $2', [id, schoolId]);
     if (teacherResult.rows.length === 0) {
       return res.status(404).json({ error: 'Teacher not found' });
     }
 
     // Delete teacher (cascade will handle related records)
-    await pool.query('DELETE FROM teachers WHERE id = $1', [id]);
+    await pool.query('DELETE FROM teachers WHERE id = $1 AND school_id = $2', [id, schoolId]);
 
     // Emit real-time update via Socket.io
     const io = req.app.get('io');
@@ -289,10 +294,11 @@ router.delete('/:id', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // Get teacher salary history
-router.get('/:id/salary-history', authenticateToken, async (req, res) => {
+router.get('/:id/salary-history', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { id } = req.params;
     const { limit = 100 } = req.query;
+    const schoolId = req.user.school_id;
 
     const result = await pool.query(
       `SELECT 
@@ -301,11 +307,11 @@ router.get('/:id/salary-history', authenticateToken, async (req, res) => {
         bm.month,
         bm.is_active as month_is_active
       FROM teacher_salary_records tsr
-      JOIN billing_months bm ON tsr.billing_month_id = bm.id
-      WHERE tsr.teacher_id = $1
+      JOIN billing_months bm ON tsr.billing_month_id = bm.id AND bm.school_id = $3
+      WHERE tsr.teacher_id = $1 AND tsr.school_id = $3
       ORDER BY bm.year DESC, bm.month DESC
       LIMIT $2`,
-      [id, parseInt(limit)]
+      [id, parseInt(limit), schoolId]
     );
 
     res.json(result.rows);
@@ -316,10 +322,11 @@ router.get('/:id/salary-history', authenticateToken, async (req, res) => {
 });
 
 // Get teacher salary payments
-router.get('/:id/payments', authenticateToken, async (req, res) => {
+router.get('/:id/payments', authenticateToken, requireSchoolContext, async (req, res) => {
   try {
     const { id } = req.params;
     const { limit = 100 } = req.query;
+    const schoolId = req.user.school_id;
 
     const result = await pool.query(
       `SELECT 
@@ -328,12 +335,12 @@ router.get('/:id/payments', authenticateToken, async (req, res) => {
         bm.month,
         u.username as paid_by_name
       FROM teacher_salary_payments tsp
-      JOIN billing_months bm ON tsp.billing_month_id = bm.id
+      JOIN billing_months bm ON tsp.billing_month_id = bm.id AND bm.school_id = $3
       JOIN users u ON tsp.paid_by = u.id
-      WHERE tsp.teacher_id = $1
+      WHERE tsp.teacher_id = $1 AND tsp.school_id = $3
       ORDER BY tsp.payment_date DESC
       LIMIT $2`,
-      [id, parseInt(limit)]
+      [id, parseInt(limit), schoolId]
     );
 
     res.json(result.rows);

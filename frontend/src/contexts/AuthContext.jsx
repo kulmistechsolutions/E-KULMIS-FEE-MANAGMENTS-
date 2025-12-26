@@ -46,6 +46,7 @@ export function useAuth() {
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
+  const [branding, setBranding] = useState({ system_name: 'FEE-KULMIS', school: null })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -62,11 +63,26 @@ export function AuthProvider({ children }) {
     try {
       const response = await apiClient.get('/auth/me')
       setUser(response.data.user)
+      try {
+        const brandingRes = await apiClient.get('/branding')
+        setBranding(brandingRes.data)
+      } catch (_) {
+        // branding is optional; keep defaults
+      }
     } catch (error) {
       localStorage.removeItem('token')
       delete apiClient.defaults.headers.common['Authorization']
     } finally {
       setLoading(false)
+    }
+  }
+
+  const refreshBranding = async () => {
+    try {
+      const brandingRes = await apiClient.get('/branding')
+      setBranding(brandingRes.data)
+    } catch (_) {
+      // ignore
     }
   }
 
@@ -76,6 +92,12 @@ export function AuthProvider({ children }) {
     localStorage.setItem('token', token)
     apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`
     setUser(user)
+    try {
+      const brandingRes = await apiClient.get('/branding')
+      setBranding(brandingRes.data)
+    } catch (_) {
+      // ignore
+    }
     return user
   }
 
@@ -83,13 +105,16 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('token')
     delete apiClient.defaults.headers.common['Authorization']
     setUser(null)
+    setBranding({ system_name: 'FEE-KULMIS', school: null })
   }
 
   const value = {
     user,
+    branding,
     loading,
     login,
-    logout
+    logout,
+    refreshBranding
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

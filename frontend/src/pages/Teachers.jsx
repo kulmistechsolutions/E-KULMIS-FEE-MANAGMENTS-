@@ -397,7 +397,7 @@ export default function Teachers() {
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Teacher Name *</label>
+                <label className="form-label mb-1">Teacher Name *</label>
                 <input
                   type="text"
                   required
@@ -407,7 +407,7 @@ export default function Teachers() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Department *</label>
+                <label className="form-label mb-1">Department *</label>
                 <select
                   required
                   className="input text-sm sm:text-base"
@@ -421,7 +421,7 @@ export default function Teachers() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Monthly Salary *</label>
+                <label className="form-label mb-1">Monthly Salary *</label>
                 <input
                   type="number"
                   step="0.01"
@@ -432,7 +432,7 @@ export default function Teachers() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                <label className="form-label mb-1">Phone Number</label>
                 <input
                   type="text"
                   className="input text-sm sm:text-base"
@@ -441,7 +441,7 @@ export default function Teachers() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Date of Joining *</label>
+                <label className="form-label mb-1">Date of Joining *</label>
                 <input
                   type="date"
                   required

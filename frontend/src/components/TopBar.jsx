@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { UserCircleIcon, Bars3Icon, ArrowRightOnRectangleIcon } from '@heroicons/react/24/outline'
 
 export default function TopBar({ onMenuClick, onSidebarToggle, sidebarCollapsed }) {
-  const { user, logout } = useAuth()
+  const { user, branding, logout } = useAuth()
   const navigate = useNavigate()
 
   const handleLogout = () => {
@@ -25,8 +25,8 @@ export default function TopBar({ onMenuClick, onSidebarToggle, sidebarCollapsed 
               <Bars3Icon className="h-6 w-6" />
             </button>
             <div>
-              <h1 className="text-lg sm:text-xl font-bold text-gray-900">Fee Management System</h1>
-              <p className="hidden sm:block text-xs text-gray-500">Rowdatul Iimaan School</p>
+              <h1 className="text-lg sm:text-xl font-bold text-gray-900">{branding?.system_name || 'FEE-KULMIS'}</h1>
+              <p className="hidden sm:block text-xs text-gray-500">{branding?.school?.name || 'SaaS Fee Management Platform'}</p>
             </div>
           </div>
 

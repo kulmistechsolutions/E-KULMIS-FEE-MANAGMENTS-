@@ -27,9 +27,10 @@ export default function Parents() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingParent, setEditingParent] = useState(null)
   const [formData, setFormData] = useState({
-    parent_name: '',
-    phone_number: '',
-    number_of_children: 1,
+    student_name: '',
+    guardian_name: '',
+    guardian_phone_number: '',
+    class_section: '',
     monthly_fee_amount: ''
   })
   const navigate = useNavigate()
@@ -76,10 +77,10 @@ export default function Parents() {
       if (statusFilter && statusFilter !== 'all') {
         params.status = statusFilter
       }
-      const response = await api.get('/parents', { params })
-      setParents(response.data.parents)
+      const response = await api.get('/students', { params })
+      setParents(response.data.students || response.data.parents || [])
     } catch (error) {
-      toast.error('Failed to fetch parents')
+      toast.error('Failed to fetch students')
     } finally {
       setLoading(false)
     }
@@ -91,24 +92,24 @@ export default function Parents() {
 
     const handleParentCreated = (data) => {
       fetchParents()
-      toast.success('New parent added', { icon: '👤' })
+      toast.success('New student added', { icon: '👤' })
     }
 
     const handleParentUpdated = (data) => {
       fetchParents()
       if (data.parent_id !== editingParent?.id) {
-        toast.success('Parent updated', { icon: '✓' })
+        toast.success('Student updated', { icon: '✓' })
       }
     }
 
     const handleParentImported = (data) => {
       fetchParents()
-      toast.success(`${data.count} parents imported`, { icon: '📥' })
+      toast.success(`${data.count} students imported`, { icon: '📥' })
     }
 
     const handleParentDeleted = (data) => {
       fetchParents()
-      toast.success('Parent deleted', { icon: '🗑️' })
+      toast.success('Student deleted', { icon: '🗑️' })
     }
 
     socket.on('parent:created', handleParentCreated)
@@ -129,27 +130,28 @@ export default function Parents() {
     e.preventDefault()
     try {
       if (editingParent) {
-        await api.put(`/parents/${editingParent.id}`, formData)
-        toast.success('Parent updated successfully')
+        await api.put(`/students/${editingParent.id}`, formData)
+        toast.success('Student updated successfully')
       } else {
-        await api.post('/parents', formData)
-        toast.success('Parent added successfully')
+        await api.post('/students', formData)
+        toast.success('Student added successfully')
       }
       setShowAddModal(false)
       setEditingParent(null)
-      setFormData({ parent_name: '', phone_number: '', number_of_children: 1, monthly_fee_amount: '' })
+      setFormData({ student_name: '', guardian_name: '', guardian_phone_number: '', class_section: '', monthly_fee_amount: '' })
       fetchParents()
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Failed to save parent')
+      toast.error(error.response?.data?.error || 'Failed to save student')
     }
   }
 
   const handleEdit = (parent) => {
     setEditingParent(parent)
     setFormData({
-      parent_name: parent.parent_name,
-      phone_number: parent.phone_number,
-      number_of_children: parent.number_of_children,
+      student_name: parent.student_name || parent.parent_name,
+      guardian_name: parent.guardian_name || parent.parent_name,
+      guardian_phone_number: parent.guardian_phone_number || parent.phone_number,
+      class_section: parent.class_section || '',
       monthly_fee_amount: parent.monthly_fee_amount
     })
     setShowAddModal(true)
@@ -157,14 +159,14 @@ export default function Parents() {
 
   const handleDownloadTemplate = async () => {
     try {
-      const response = await api.get('/parents/import/template', {
+      const response = await api.get('/students/import/template', {
         responseType: 'blob'
       })
       
       const url = window.URL.createObjectURL(new Blob([response.data]))
       const link = document.createElement('a')
       link.href = url
-      link.setAttribute('download', 'parents_import_template.xlsx')
+      link.setAttribute('download', 'students_import_template.xlsx')
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -189,7 +191,7 @@ export default function Parents() {
         params.search = debouncedSearch
       }
       
-      const response = await api.get('/parents/export', {
+      const response = await api.get('/students/export', {
         params,
         responseType: 'blob'
       })
@@ -214,9 +216,9 @@ export default function Parents() {
       link.remove()
       window.URL.revokeObjectURL(url)
       
-      toast.success('Parents exported successfully')
+      toast.success('Students exported successfully')
     } catch (error) {
-      toast.error('Failed to export parents')
+      toast.error('Failed to export students')
     }
   }
 
@@ -228,27 +230,27 @@ export default function Parents() {
     formData.append('file', file)
 
     try {
-      const response = await api.post('/parents/import', formData, {
+      const response = await api.post('/students/import', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
-      toast.success(`Imported ${response.data.imported} parents`)
+      toast.success(`Imported ${response.data.imported} students`)
       fetchParents()
     } catch (error) {
-      toast.error('Failed to import parents')
+      toast.error('Failed to import students')
     }
   }
 
   const handleDelete = async (parent) => {
-    if (!window.confirm(`Are you sure you want to delete "${parent.parent_name}"? This will also delete all associated payment records. This action cannot be undone.`)) {
+    if (!window.confirm(`Are you sure you want to delete "${parent.student_name || parent.parent_name}"? This will also delete all associated payment records. This action cannot be undone.`)) {
       return
     }
 
     try {
-      await api.delete(`/parents/${parent.id}`)
-      toast.success('Parent deleted successfully')
+      await api.delete(`/students/${parent.id}`)
+      toast.success('Student deleted successfully')
       fetchParents()
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Failed to delete parent')
+      toast.error(error.response?.data?.error || 'Failed to delete student')
     }
   }
 
@@ -266,8 +268,8 @@ export default function Parents() {
     <div className="w-full max-w-full space-y-4 sm:space-y-6 px-2 sm:px-0">
       <div className="flex flex-col gap-4">
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900">Parents</h1>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">Manage parent information and fee records</p>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900">Students</h1>
+          <p className="text-xs sm:text-sm text-gray-500 mt-1">Manage student records and fee accounts</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full sm:w-auto">
           <button 
@@ -277,7 +279,7 @@ export default function Parents() {
               statusFilter && statusFilter !== 'all' 
                 ? `Export ${statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1)} Parents${selectedMonthId ? ' for selected month' : ''}`
                 : selectedMonthId 
-                  ? 'Export Parents for selected month'
+                  ? 'Export Students for selected month'
                   : 'Export all parents to Excel'
             }
           >
@@ -285,7 +287,7 @@ export default function Parents() {
             <span className="hidden sm:inline">
               {statusFilter && statusFilter !== 'all' 
                 ? `Export ${statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1)}`
-                : 'Export Parents'}
+                : 'Export Students'}
             </span>
             <span className="sm:hidden">Export</span>
           </button>
@@ -306,7 +308,7 @@ export default function Parents() {
           </label>
           <button onClick={() => setShowAddModal(true)} className="btn btn-primary w-full sm:w-auto text-sm">
             <PlusIcon className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" />
-            Add Parent
+            Add Student
           </button>
         </div>
       </div>
@@ -384,7 +386,7 @@ export default function Parents() {
           </div>
         ) : parents.length === 0 ? (
           <div className="p-8 text-center text-gray-500">
-            No parents found. Add a new parent to get started.
+            No students found. Add a new student to get started.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -392,10 +394,10 @@ export default function Parents() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Parent Name
+                    Student Name
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Phone
+                    Guardian Phone
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Children
@@ -418,13 +420,13 @@ export default function Parents() {
                 {parents.map((parent) => (
                   <tr key={parent.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {parent.parent_name}
+                      {parent.student_name || parent.parent_name}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {parent.phone_number}
+                      {parent.guardian_phone_number || parent.phone_number}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {parent.number_of_children}
+                      {parent.class_section || 'N/A'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       ${parseFloat(parent.monthly_fee_amount).toLocaleString()}
@@ -447,7 +449,7 @@ export default function Parents() {
                           <PencilIcon className="h-5 w-5" />
                         </button>
                         <button
-                          onClick={() => navigate(`/parents/${parent.id}/profile`)}
+                          onClick={() => navigate(`/students/${parent.id}/profile`)}
                           className="text-gray-600 hover:text-gray-900"
                           title="View Profile & Timeline"
                         >
@@ -456,7 +458,7 @@ export default function Parents() {
                         <button
                           onClick={() => handleDelete(parent)}
                           className="text-red-600 hover:text-red-900"
-                          title="Delete Parent"
+                          title="Delete Student"
                         >
                           <TrashIcon className="h-5 w-5" />
                         </button>
@@ -478,7 +480,7 @@ export default function Parents() {
           </div>
         ) : parents.length === 0 ? (
           <div className="card p-6 text-center text-gray-500">
-            No parents found. Add a new parent to get started.
+            No students found. Add a new student to get started.
           </div>
         ) : (
           parents.map((parent) => (
@@ -486,9 +488,9 @@ export default function Parents() {
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1 min-w-0">
                   <h3 className="text-base font-bold text-gray-900 truncate mb-1">
-                    {parent.parent_name}
+                    {parent.student_name || parent.parent_name}
                   </h3>
-                  <p className="text-sm text-gray-600 break-all">{parent.phone_number}</p>
+                  <p className="text-sm text-gray-600 break-all">{parent.guardian_phone_number || parent.phone_number}</p>
                 </div>
                 <span className={`px-2 py-1 text-xs font-semibold rounded-full flex-shrink-0 ml-2 ${getStatusBadge(parent.current_month_status)}`}>
                   {parent.current_month_status || 'N/A'}
@@ -498,7 +500,7 @@ export default function Parents() {
               <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
                 <div>
                   <p className="text-xs text-gray-600">Children</p>
-                  <p className="font-semibold">{parent.number_of_children}</p>
+                  <p className="font-semibold">{parent.class_section || 'N/A'}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-600">Monthly Fee</p>
@@ -521,7 +523,7 @@ export default function Parents() {
                   Edit
                 </button>
                 <button
-                  onClick={() => navigate(`/parents/${parent.id}/profile`)}
+                  onClick={() => navigate(`/students/${parent.id}/profile`)}
                   className="flex-1 btn btn-primary text-sm py-2 flex items-center justify-center gap-2"
                 >
                   <EyeIcon className="h-4 w-4" />
@@ -545,42 +547,50 @@ export default function Parents() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-4 sm:p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-4">
-              {editingParent ? 'Edit Parent' : 'Add New Parent'}
+              {editingParent ? 'Edit Student' : 'Add New Student'}
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Parent Name</label>
+                <label className="form-label mb-1">Student Name</label>
                 <input
                   type="text"
                   required
                   className="input text-sm sm:text-base"
-                  value={formData.parent_name}
-                  onChange={(e) => setFormData({ ...formData, parent_name: e.target.value })}
+                  value={formData.student_name || ''}
+                  onChange={(e) => setFormData({ ...formData, student_name: e.target.value })}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                <label className="form-label mb-1">Parent/Guardian Name</label>
                 <input
                   type="text"
                   required
                   className="input text-sm sm:text-base"
-                  value={formData.phone_number}
-                  onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
+                  value={formData.guardian_name || ''}
+                  onChange={(e) => setFormData({ ...formData, guardian_name: e.target.value })}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Number of Children</label>
+                <label className="form-label mb-1">Parent/Guardian Phone Number</label>
                 <input
-                  type="number"
-                  min="1"
+                  type="text"
                   required
                   className="input text-sm sm:text-base"
-                  value={formData.number_of_children}
-                  onChange={(e) => setFormData({ ...formData, number_of_children: parseInt(e.target.value) })}
+                  value={formData.guardian_phone_number || ''}
+                  onChange={(e) => setFormData({ ...formData, guardian_phone_number: e.target.value })}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Monthly Fee Amount</label>
+                <label className="form-label mb-1">Class / Section</label>
+                <input
+                  type="text"
+                  className="input text-sm sm:text-base"
+                  value={formData.class_section || ''}
+                  onChange={(e) => setFormData({ ...formData, class_section: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="form-label mb-1">Monthly Fee Amount</label>
                 <input
                   type="number"
                   step="0.01"
@@ -592,14 +602,14 @@ export default function Parents() {
               </div>
               <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 pt-4">
                 <button type="submit" className="flex-1 btn btn-primary text-sm sm:text-base">
-                  {editingParent ? 'Update' : 'Add'} Parent
+                  {editingParent ? 'Update' : 'Add'} Student
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     setShowAddModal(false)
                     setEditingParent(null)
-                    setFormData({ parent_name: '', phone_number: '', number_of_children: 1, monthly_fee_amount: '' })
+                    setFormData({ student_name: '', guardian_name: '', guardian_phone_number: '', class_section: '', monthly_fee_amount: '' })
                   }}
                   className="flex-1 btn btn-outline text-sm sm:text-base"
                 >

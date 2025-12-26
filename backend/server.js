@@ -8,6 +8,8 @@ import { dirname, join } from 'path';
 
 // Import routes
 import authRoutes from './routes/auth.js';
+import brandingRoutes from './routes/branding.js';
+import schoolRoutes from './routes/schools.js';
 import parentRoutes from './routes/parents.js';
 import monthRoutes from './routes/months.js';
 import paymentRoutes from './routes/payments.js';
@@ -116,12 +118,16 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve logo
-app.use('/api/logo', express.static(join(__dirname, '..', 'LOGO.jpeg')));
+// Publicly serve uploaded assets (school logos, etc.)
+app.use('/api/uploads', express.static(join(__dirname, 'uploads')));
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/branding', brandingRoutes);
+app.use('/api/schools', schoolRoutes);
 app.use('/api/parents', parentRoutes);
+// Students is a terminology rename; keep parents endpoints for backward compatibility
+app.use('/api/students', parentRoutes);
 app.use('/api/months', monthRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/reports', reportRoutes);

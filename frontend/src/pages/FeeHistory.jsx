@@ -4,6 +4,7 @@ import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { ArrowLeftIcon, DocumentArrowDownIcon, ClipboardIcon } from '@heroicons/react/24/outline'
 import jsPDF from 'jspdf'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function FeeHistory() {
   const { id } = useParams()
@@ -11,6 +12,7 @@ export default function FeeHistory() {
   const [parent, setParent] = useState(null)
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
+  const { branding } = useAuth()
 
   useEffect(() => {
     fetchData()
@@ -20,8 +22,8 @@ export default function FeeHistory() {
     try {
       setLoading(true)
       const [parentRes, historyRes] = await Promise.all([
-        api.get(`/parents/${id}`),
-        api.get(`/parents/${id}/history`)
+        api.get(`/students/${id}`),
+        api.get(`/students/${id}/history`)
       ])
       setParent(parentRes.data)
       setHistory(historyRes.data)
@@ -39,7 +41,7 @@ export default function FeeHistory() {
     
     // Try to add logo
     try {
-      const logoUrl = '/logo.jpeg'
+      const logoUrl = branding?.school?.logo_path || '/systemlogo.png'
       const img = new Image()
       img.crossOrigin = 'anonymous'
       img.src = logoUrl
@@ -69,7 +71,7 @@ export default function FeeHistory() {
     doc.setFontSize(16)
     doc.setFont(undefined, 'bold')
     doc.setTextColor(30, 58, 138) // Blue color
-    doc.text('Rowdatul Iimaan School', pageWidth / 2, yPos, { align: 'center' })
+    doc.text(branding?.school?.name || 'FEE-KULMIS', pageWidth / 2, yPos, { align: 'center' })
     
     yPos += 7
     doc.setFontSize(12)
@@ -91,9 +93,9 @@ export default function FeeHistory() {
     doc.setTextColor(0, 0, 0)
     
     const parentInfo = [
-      `Parent: ${String(payment.parent_name || 'N/A')}`,
-      `Phone: ${String(payment.phone_number || 'N/A')}`,
-      `Children: ${String(payment.number_of_children || 'N/A')}`
+      `Student: ${String(payment.student_name || 'N/A')}`,
+      `Guardian: ${String(payment.guardian_name || 'N/A')}`,
+      `Phone: ${String(payment.guardian_phone_number || 'N/A')}`
     ]
     
     parentInfo.forEach((info, idx) => {
@@ -219,26 +221,26 @@ export default function FeeHistory() {
   return (
     <div className="space-y-6">
       <div className="flex items-center space-x-4">
-        <button onClick={() => navigate('/parents')} className="btn btn-outline">
+        <button onClick={() => navigate('/students')} className="btn btn-outline">
           <ArrowLeftIcon className="h-5 w-5 mr-2" />
           Back
         </button>
         <h1 className="text-3xl font-bold text-gray-900">
-          Fee History - {parent?.parent_name}
+          Fee History - {parent?.student_name || parent?.parent_name}
         </h1>
       </div>
 
       {parent && (
         <div className="card">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Parent Information</h2>
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Student Information</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <p className="text-sm text-gray-600">Phone</p>
-              <p className="font-semibold">{parent.phone_number}</p>
+              <p className="text-sm text-gray-600">Guardian Phone</p>
+              <p className="font-semibold">{parent.guardian_phone_number || parent.phone_number}</p>
             </div>
             <div>
-              <p className="text-sm text-gray-600">Children</p>
-              <p className="font-semibold">{parent.number_of_children}</p>
+              <p className="text-sm text-gray-600">Class / Section</p>
+              <p className="font-semibold">{parent.class_section || 'N/A'}</p>
             </div>
             <div>
               <p className="text-sm text-gray-600">Monthly Fee</p>

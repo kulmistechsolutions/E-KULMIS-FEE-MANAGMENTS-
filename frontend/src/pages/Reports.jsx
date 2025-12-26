@@ -111,39 +111,39 @@ export default function Reports() {
             </div>
           </div>
           <p className="text-xs sm:text-sm text-primary-700">
-            Download a comprehensive report including all parent fees, teacher salaries, and expenses.
+            Download a comprehensive report including all student fees, teacher salaries, and expenses.
           </p>
         </div>
 
         {/* Separate Export Sections */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-          {/* Parents Export */}
+          {/* Students Export */}
           <div className="card p-4 sm:p-6">
             <div className="flex justify-between items-center mb-3 sm:mb-4">
               <h3 className="text-base sm:text-lg font-bold text-gray-900 flex items-center">
                 <UsersIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-2 text-blue-600" />
-                Parents Fees
+                Students Fees
               </h3>
               <div className="flex gap-2">
                 <button 
-                  onClick={() => handleExport('parents', 'excel')} 
+                  onClick={() => handleExport('students', 'excel')} 
                   className="btn btn-primary btn-sm text-xs sm:text-sm"
-                  title="Export Parents to Excel"
+                  title="Export Students to Excel"
                 >
                   <ArrowDownTrayIcon className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-1" />
                   <span className="hidden sm:inline">Excel</span>
                 </button>
                 <button 
-                  onClick={() => handleExport('parents', 'pdf')} 
+                  onClick={() => handleExport('students', 'pdf')} 
                   className="btn btn-outline btn-sm text-xs sm:text-sm"
-                  title="Export Parents to PDF"
+                  title="Export Students to PDF"
                 >
                   <DocumentArrowDownIcon className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-1" />
                   <span className="hidden sm:inline">PDF</span>
                 </button>
               </div>
             </div>
-            <p className="text-xs sm:text-sm text-gray-600">Export detailed parent fee records.</p>
+            <p className="text-xs sm:text-sm text-gray-600">Export detailed student fee records.</p>
           </div>
 
           {/* Teachers Export */}
@@ -209,7 +209,7 @@ export default function Reports() {
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
         <div className="card p-3 sm:p-4 md:p-6">
-          <p className="text-xs sm:text-sm font-medium text-gray-600">Total Parents</p>
+          <p className="text-xs sm:text-sm font-medium text-gray-600">Total Students</p>
           <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">{summary?.total_parents || 0}</p>
         </div>
         <div className="card p-3 sm:p-4 md:p-6">

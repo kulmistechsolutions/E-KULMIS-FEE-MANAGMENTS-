@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { splitSqlStatements } from './sql-utils.js';
 
 dotenv.config();
 
@@ -39,8 +40,7 @@ async function migrate() {
     const migrationPath = join(__dirname, '..', 'database', 'migration_teacher_expenses.sql');
     const migration = readFileSync(migrationPath, 'utf8');
     
-    // Split by semicolons and execute each statement
-    const statements = migration.split(';').filter(s => s.trim().length > 0);
+    const statements = splitSqlStatements(migration);
     
     for (const statement of statements) {
       if (statement.trim()) {

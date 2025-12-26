@@ -121,7 +121,7 @@ export default function PayTeacherSalary() {
 
       {/* Month Selection */}
       <div className="card p-3 sm:p-4 md:p-6">
-        <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">Select Month</label>
+        <label className="form-label-xs">Select Month</label>
         <select
           value={selectedMonthId || ''}
           onChange={(e) => setSelectedMonthId(parseInt(e.target.value))}
@@ -276,7 +276,7 @@ export default function PayTeacherSalary() {
             </div>
             <form onSubmit={handlePaymentSubmit} className="space-y-3 sm:space-y-4">
               <div>
-                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">Payment Type</label>
+                <label className="form-label-xs mb-1">Payment Type</label>
                 <select
                   className="input text-sm sm:text-base"
                   value={paymentData.payment_type}
@@ -288,7 +288,7 @@ export default function PayTeacherSalary() {
                 </select>
               </div>
               <div>
-                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">Amount</label>
+                <label className="form-label-xs mb-1">Amount</label>
                 <input
                   type="number"
                   step="0.01"
@@ -300,7 +300,7 @@ export default function PayTeacherSalary() {
               </div>
               {paymentData.payment_type === 'advance' && (
                 <div>
-                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">Months in Advance</label>
+                  <label className="form-label-xs mb-1">Months in Advance</label>
                   <input
                     type="number"
                     min="1"
@@ -312,7 +312,7 @@ export default function PayTeacherSalary() {
                 </div>
               )}
               <div>
-                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">Notes (Optional)</label>
+                <label className="form-label-xs mb-1">Notes (Optional)</label>
                 <textarea
                   className="input text-sm sm:text-base"
                   rows="3"

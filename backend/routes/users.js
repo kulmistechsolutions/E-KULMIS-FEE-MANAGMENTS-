@@ -1,15 +1,17 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import pool from '../database/db.js';
-import { authenticateToken, requireAdmin } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin, requireSchoolContext } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // Get all users (admin only)
-router.get('/', authenticateToken, requireAdmin, async (req, res) => {
+router.get('/', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
+    const schoolId = req.user.school_id;
     const result = await pool.query(
-      'SELECT id, username, email, role, is_active, created_at FROM users ORDER BY created_at DESC'
+      'SELECT id, username, email, role, is_active, created_at FROM users WHERE school_id = $1 ORDER BY created_at DESC',
+      [schoolId]
     );
     res.json(result.rows);
   } catch (error) {
@@ -19,9 +21,10 @@ router.get('/', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // Create user (admin only)
-router.post('/', authenticateToken, requireAdmin, async (req, res) => {
+router.post('/', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { username, email, password, role } = req.body;
+    const schoolId = req.user.school_id;
 
     if (!username || !email || !password) {
       return res.status(400).json({ error: 'Username, email, and password are required' });
@@ -30,9 +33,9 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
 
     const result = await pool.query(
-      `INSERT INTO users (username, email, password_hash, role)
-       VALUES ($1, $2, $3, $4) RETURNING id, username, email, role, is_active, created_at`,
-      [username, email, passwordHash, role || 'cashier']
+      `INSERT INTO users (username, email, password_hash, role, school_id)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id, username, email, role, is_active, created_at`,
+      [username, email, passwordHash, role || 'cashier', schoolId]
     );
 
     res.status(201).json(result.rows[0]);
@@ -46,10 +49,11 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // Update user (admin only)
-router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
+router.put('/:id', authenticateToken, requireSchoolContext, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { username, email, password, role, is_active } = req.body;
+    const schoolId = req.user.school_id;
 
     let updateFields = [];
     let params = [];
@@ -82,7 +86,8 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
     }
 
     params.push(id);
-    const query = `UPDATE users SET ${updateFields.join(', ')} WHERE id = $${paramIndex} RETURNING id, username, email, role, is_active, created_at`;
+    params.push(schoolId);
+    const query = `UPDATE users SET ${updateFields.join(', ')} WHERE id = $${paramIndex} AND school_id = $${paramIndex + 1} RETURNING id, username, email, role, is_active, created_at`;
 
     const result = await pool.query(query, params);
 

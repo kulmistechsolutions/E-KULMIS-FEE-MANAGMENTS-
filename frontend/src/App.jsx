@@ -17,6 +17,8 @@ import PayTeacherSalary from './pages/PayTeacherSalary'
 import TeacherProfile from './pages/TeacherProfile'
 import Expenses from './pages/Expenses'
 import UserMonitoring from './pages/UserMonitoring'
+import SuperAdminSchools from './pages/SuperAdminSchools'
+import SchoolBranding from './pages/SchoolBranding'
 import Layout from './components/Layout'
 
 function PrivateRoute({ children }) {
@@ -30,7 +32,9 @@ function PrivateRoute({ children }) {
     )
   }
 
-  return user ? children : <Navigate to="/login" />
+  // Landing page behavior:
+  // If not authenticated, show Login directly at the current URL (e.g. "/")
+  return user ? children : <Login />
 }
 
 function AdminRoute({ children }) {
@@ -48,8 +52,32 @@ function AdminRoute({ children }) {
     return <Navigate to="/login" />
   }
 
-  if (user.role !== 'admin') {
+  if (user.role === 'super_admin') {
+    return <Navigate to="/platform/schools" />
+  }
+
+  if (user.role !== 'admin' && user.role !== 'school_admin') {
     return <Navigate to="/collect-fee" />
+  }
+
+  return children
+}
+
+function SuperAdminRoute({ children }) {
+  const { user, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      </div>
+    )
+  }
+
+  if (!user) return <Navigate to="/login" />
+
+  if (user.role !== 'super_admin') {
+    return <Navigate to="/" />
   }
 
   return children
@@ -58,7 +86,8 @@ function AdminRoute({ children }) {
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
+      {/* Backward compatible login URL */}
+      <Route path="/login" element={<Navigate to="/" replace />} />
       <Route
         path="/"
         element={
@@ -68,11 +97,22 @@ function AppRoutes() {
         }
       >
         <Route index element={<AdminRoute><Dashboard /></AdminRoute>} />
-        <Route path="parents" element={<Parents />} />
-        <Route path="parents/:id/profile" element={<ParentProfile />} />
-        <Route path="parents/:id/history" element={<FeeHistory />} />
+
+        {/* Super Admin (Platform) */}
+        <Route path="platform/schools" element={<SuperAdminRoute><SuperAdminSchools /></SuperAdminRoute>} />
+
+        {/* Students (was Parents) */}
+        <Route path="students" element={<Parents />} />
+        <Route path="students/:id/profile" element={<ParentProfile />} />
+        <Route path="students/:id/history" element={<FeeHistory />} />
+        {/* Backward compatible paths */}
+        <Route path="parents" element={<Navigate to="/students" replace />} />
+        <Route path="parents/:id/profile" element={<Navigate to="/students/:id/profile" replace />} />
+        <Route path="parents/:id/history" element={<Navigate to="/students/:id/history" replace />} />
+
         <Route path="collect-fee" element={<CollectFee />} />
         {/* Admin-only routes */}
+        <Route path="school-branding" element={<AdminRoute><SchoolBranding /></AdminRoute>} />
         <Route path="reports" element={<AdminRoute><Reports /></AdminRoute>} />
         <Route path="teachers" element={<AdminRoute><Teachers /></AdminRoute>} />
         <Route path="teachers/:id/profile" element={<AdminRoute><TeacherProfile /></AdminRoute>} />

@@ -56,11 +56,24 @@ STEP 5: LOGIN
 
 1. Open browser: http://localhost:3000
 
-2. Login with:
-   Username: admin
-   Password: admin123
+2. First time setup (recommended):
+   - Run DB setup (creates schema + multi-tenant tables + default users):
+     cd backend
+     npm run setup-db
 
-3. ⚠️ Change password after first login!
+3. Login options:
+
+   A) Super Admin (Platform)
+      Username: superadmin
+      Password: superadmin123
+      - Use this account to create schools and the first School Admin.
+
+   B) School Admin (Single school / local dev)
+      Username: admin
+      Password: admin123
+      - This account is linked to the default school.
+
+4. ⚠️ Change passwords after first login!
 
 
 ═══════════════════════════════════════════════════════════════
@@ -76,7 +89,8 @@ STEP 5: LOGIN
    → Check DATABASE_URL host/port
 
 ❌ "Invalid username or password"
-   → Check database credentials in DATABASE_URL
+   → If you upgraded to multi-tenant, run: cd backend; npm run setup-db
+   → Or create platform user: cd backend; npm run create-super-admin
 
 ❌ "Database does not exist"
    → Create database: CREATE DATABASE rowdatul_iimaan;
