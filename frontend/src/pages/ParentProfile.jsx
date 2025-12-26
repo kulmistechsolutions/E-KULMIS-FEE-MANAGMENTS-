@@ -12,6 +12,7 @@ import {
   FunnelIcon
 } from '@heroicons/react/24/outline'
 import jsPDF from 'jspdf'
+import { resolveApiAssetUrl } from '../utils/url'
 
 export default function ParentProfile() {
   const { id } = useParams()
@@ -215,7 +216,7 @@ export default function ParentProfile() {
     
     // Try to add logo
     try {
-      const logoUrl = branding?.school?.logo_path || '/systemlogo.png'
+      const logoUrl = resolveApiAssetUrl(branding?.school?.logo_path) || '/systemlogo.png'
       const img = new Image()
       img.crossOrigin = 'anonymous'
       img.src = logoUrl

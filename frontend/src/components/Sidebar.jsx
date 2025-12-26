@@ -16,6 +16,7 @@ import {
   PresentationChartLineIcon,
   Cog6ToothIcon
 } from '@heroicons/react/24/outline'
+import { resolveApiAssetUrl } from '../utils/url'
 
 // All navigation items with role requirements
 const allNavigation = [
@@ -69,7 +70,7 @@ export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapse }
             {!collapsed && (
               <div className="flex items-center flex-shrink-0">
                 <img
-                  src={branding?.school?.logo_path || '/systemlogo.png'}
+                  src={resolveApiAssetUrl(branding?.school?.logo_path) || '/systemlogo.png'}
                   alt={branding?.school?.name || 'School Logo'}
                   className="h-10 w-10 rounded-full object-cover"
                 />
@@ -81,7 +82,7 @@ export default function Sidebar({ isOpen, onClose, collapsed, onToggleCollapse }
             )}
             {collapsed && (
               <img
-                src={branding?.school?.logo_path || '/systemlogo.png'}
+                src={resolveApiAssetUrl(branding?.school?.logo_path) || '/systemlogo.png'}
                 alt="Logo"
                 className="h-10 w-10 rounded-full object-cover mx-auto"
               />

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
+import { resolveApiAssetUrl } from '../utils/url'
 
 export default function SchoolBranding() {
   const { branding, refreshBranding } = useAuth()
@@ -71,7 +72,7 @@ export default function SchoolBranding() {
       <div className="card p-4 sm:p-6 space-y-4">
         <div className="flex items-center gap-3">
           <img
-            src={branding?.school?.logo_path || '/systemlogo.png'}
+            src={resolveApiAssetUrl(branding?.school?.logo_path) || '/systemlogo.png'}
             alt={branding?.school?.name || 'School Logo'}
             className="h-12 w-12 rounded-full object-cover border"
           />

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import { PlusIcon } from '@heroicons/react/24/outline'
+import { resolveApiAssetUrl } from '../utils/url'
 
 const INCLUDED_FEATURES = [
   'Students Management',
@@ -240,7 +241,7 @@ export default function SuperAdminSchools() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-3">
                         <img
-                          src={s.logo_path || '/systemlogo.png'}
+                          src={resolveApiAssetUrl(s.logo_path) || '/systemlogo.png'}
                           alt={s.name}
                           className="h-9 w-9 rounded-full object-cover border"
                         />
