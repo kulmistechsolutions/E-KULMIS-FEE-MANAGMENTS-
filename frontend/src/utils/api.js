@@ -1,7 +1,18 @@
 import axios from 'axios'
 
+// Normalize API base URL so both of these work:
+// - VITE_API_URL=https://your-backend.onrender.com
+// - VITE_API_URL=https://your-backend.onrender.com/api
+const getApiBaseURL = () => {
+  const envUrl = import.meta.env.VITE_API_URL
+  if (envUrl && (envUrl.startsWith('http://') || envUrl.startsWith('https://'))) {
+    return envUrl.endsWith('/api') ? envUrl : `${envUrl}/api`
+  }
+  return envUrl || '/api'
+}
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: getApiBaseURL(),
   headers: {
     'Content-Type': 'application/json'
   }
